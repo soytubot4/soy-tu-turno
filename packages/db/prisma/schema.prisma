@@ -116,6 +116,7 @@ model Tenant {
   services     Service[]
   resources    Resource[]
   appointments Appointment[]
+  reviews      Review[]
 
   @@map("tenants")
 }
@@ -185,6 +186,7 @@ model Customer {
 
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   appointments Appointment[]
+  reviews      Review[]
 
   @@unique([tenantId, phone])
   @@unique([tenantId, dni])
@@ -240,6 +242,7 @@ model Resource {
   schedules    ResourceSchedule[]
   blocks       ScheduleBlock[]
   appointments Appointment[]
+  reviews      Review[]
 
   @@index([tenantId])
   @@map("resources")
@@ -321,4 +324,26 @@ model Appointment {
   @@index([tenantId, startAt])
   @@index([tenantId, resourceId, startAt])
   @@map("appointments")
+}
+
+/// Reseña/puntuación de un negocio o de un profesional. resourceId null = del negocio.
+/// SELECT público (rating es info pública); INSERT solo con tenant context.
+model Review {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  resourceId    String?  @map("resource_id") @db.Uuid
+  customerId    String?  @map("customer_id") @db.Uuid
+  appointmentId String?  @map("appointment_id") @db.Uuid
+  rating        Int // 1..5
+  comment       String?
+  authorName    String?  @map("author_name")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  resource Resource? @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, resourceId])
+  @@map("reviews")
 }

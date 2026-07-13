@@ -1,9 +1,16 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { PortalBookInput } from '@soytuturno/shared';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import type { PortalBookInput, PortalReviewInput } from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
 import { AvailabilityService } from '@/appointments/availability.service';
 
 type Tx = Parameters<Parameters<PrismaService['tenantSafe']>[0]>[0];
+
+/** Promedio (1 decimal) + cantidad de un set de puntuaciones. */
+function ratingOf(ratings: number[]): { avg: number | null; count: number } {
+  if (!ratings.length) return { avg: null, count: 0 };
+  const sum = ratings.reduce((a, b) => a + b, 0);
+  return { avg: Math.round((sum / ratings.length) * 10) / 10, count: ratings.length };
+}
 
 /**
  * API pública del portal del cliente (<slug>.soytuturno.com). No hay sesión de
@@ -23,10 +30,10 @@ export class PortalService {
     return tenant.id;
   }
 
-  /** Info pública del comercio + servicios activos (para armar la pantalla). */
+  /** Info pública del comercio + servicios + profesionales, con rating de cada uno. */
   async info(slug: string) {
     const tenantId = await this.tenantId(slug);
-    return this.prisma.tenantSafe(async (tx) => {
+    const base = await this.prisma.tenantSafe(async (tx) => {
       const tenant = await tx.tenant.findFirst({
         select: { name: true, logoUrl: true, address: true, phone: true, currency: true },
       });
@@ -35,7 +42,72 @@ export class PortalService {
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         select: { id: true, name: true, description: true, durationMin: true, price: true },
       });
-      return { tenant, services };
+      const resources = await tx.resource.findMany({
+        where: { active: true },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: { id: true, name: true, title: true, avatarUrl: true },
+      });
+      return { tenant, services, resources };
+    }, tenantId);
+
+    // Ratings en una tx aparte y tolerante: si la tabla reviews aún no se creó,
+    // devolvemos "sin reseñas" en vez de romper el portal.
+    let business = ratingOf([]);
+    const byResource = new Map<string, number[]>();
+    try {
+      const all = await this.prisma.tenantSafe(
+        (tx) => tx.review.findMany({ select: { resourceId: true, rating: true } }),
+        tenantId,
+      );
+      business = ratingOf(all.map((r) => r.rating));
+      for (const r of all) {
+        if (!r.resourceId) continue;
+        const arr = byResource.get(r.resourceId) ?? [];
+        arr.push(r.rating);
+        byResource.set(r.resourceId, arr);
+      }
+    } catch {
+      // tabla reviews todavía no creada
+    }
+
+    return {
+      tenant: base.tenant,
+      rating: business,
+      services: base.services,
+      resources: base.resources.map((r) => ({ ...r, rating: ratingOf(byResource.get(r.id) ?? []) })),
+    };
+  }
+
+  /** Deja una reseña del negocio (sin resourceId) o de un profesional. */
+  async review(slug: string, input: PortalReviewInput) {
+    const tenantId = await this.tenantId(slug);
+    return this.prisma.tenantSafe(async (tx) => {
+      if (input.resourceId) {
+        const r = await tx.resource.findFirst({
+          where: { id: input.resourceId },
+          select: { id: true },
+        });
+        if (!r) throw new BadRequestException('El profesional no existe');
+      }
+      let customerId: string | null = null;
+      if (input.phone?.trim()) {
+        const c = await tx.customer.findFirst({
+          where: { phone: input.phone.trim() },
+          select: { id: true },
+        });
+        customerId = c?.id ?? null;
+      }
+      await tx.review.create({
+        data: {
+          tenantId,
+          resourceId: input.resourceId ?? null,
+          customerId,
+          rating: input.rating,
+          comment: input.comment?.trim() || null,
+          authorName: input.authorName?.trim() || null,
+        },
+      });
+      return { ok: true };
     }, tenantId);
   }
 

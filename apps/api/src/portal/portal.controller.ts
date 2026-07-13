@@ -1,6 +1,11 @@
 import { BadRequestException, Body, Controller, Get, Headers, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
-import { portalBookSchema, type PortalBookInput } from '@soytuturno/shared';
+import {
+  portalBookSchema,
+  portalReviewSchema,
+  type PortalBookInput,
+  type PortalReviewInput,
+} from '@soytuturno/shared';
 import { Public } from '@/auth/decorators/public.decorator';
 import { ZodValidationPipe } from '@/common/pipes/zod-validation.pipe';
 import { PortalService } from './portal.service';
@@ -50,5 +55,14 @@ export class PortalController {
     @Headers('x-tenant-slug') slug?: string,
   ) {
     return { ok: true, data: await this.service.book(this.slugOrThrow(slug), body) };
+  }
+
+  @Public()
+  @Post('review')
+  async review(
+    @Body(new ZodValidationPipe(portalReviewSchema)) body: PortalReviewInput,
+    @Headers('x-tenant-slug') slug?: string,
+  ) {
+    return { ok: true, data: await this.service.review(this.slugOrThrow(slug), body) };
   }
 }

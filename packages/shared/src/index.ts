@@ -140,6 +140,19 @@ export const createCustomerSchema = z.object({
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 
 // ─────────────────────────────────────────────────────────────
+// Reseñas / puntuaciones (negocio o profesional)
+// ─────────────────────────────────────────────────────────────
+export const portalReviewSchema = z.object({
+  rating: z.coerce.number().int().min(1, 'Poné al menos 1 estrella').max(5),
+  comment: z.string().trim().max(500).optional(),
+  // Sin resourceId => reseña del negocio. Con resourceId => del profesional.
+  resourceId: z.string().uuid().optional(),
+  authorName: z.string().trim().max(120).optional(),
+  phone: z.string().trim().max(40).optional(),
+});
+export type PortalReviewInput = z.infer<typeof portalReviewSchema>;
+
+// ─────────────────────────────────────────────────────────────
 // Portal público del cliente (reserva self-service)
 // ─────────────────────────────────────────────────────────────
 export const portalBookSchema = z.object({
