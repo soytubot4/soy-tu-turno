@@ -158,13 +158,18 @@ export default function PortalPage() {
       {service && (
         <Section step={2} title="Elegí día y horario">
           <div className="mb-3 flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => setDate(shiftYmd(date, -1))} disabled={date === todayYmd()}>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setDate(shiftYmd(date, -1))}
+              disabled={date === todayYmd()}
+            >
               <ChevronLeft className="h-4 w-4" />
             </Button>
+            <span className="flex-1 text-center text-sm font-medium capitalize">{fmtLongDate(date)}</span>
             <Button variant="outline" size="icon" onClick={() => setDate(shiftYmd(date, 1))}>
               <ChevronRight className="h-4 w-4" />
             </Button>
-            <span className="flex-1 text-sm font-medium capitalize">{fmtLongDate(date)}</span>
           </div>
           {loadingSlots ? (
             <p className="text-sm text-[var(--color-muted-foreground)]">Buscando horarios…</p>
