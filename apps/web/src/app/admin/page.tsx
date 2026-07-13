@@ -3,18 +3,20 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { LogOut, Store } from 'lucide-react';
+import { LogOut, Store, Plus } from 'lucide-react';
 import { listAdminTenants, updateTenantTurno, type AdminTenant } from '@/features/admin/api';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { CreateTenantDialog } from './create-tenant-dialog';
 
 const DEFAULT_TZ = 'America/Asuncion';
 
 export default function AdminPage() {
   const router = useRouter();
+  const [createOpen, setCreateOpen] = useState(false);
   const { data: tenants, isLoading, isError, error } = useQuery({
     queryKey: ['admin', 'tenants'],
     queryFn: listAdminTenants,
@@ -38,10 +40,17 @@ export default function AdminPage() {
             Activá el turnero por comercio y configurá su zona horaria.
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={logout}>
-          <LogOut className="h-4 w-4" /> Salir
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" /> Nuevo comercio
+          </Button>
+          <Button variant="ghost" size="sm" onClick={logout}>
+            <LogOut className="h-4 w-4" /> Salir
+          </Button>
+        </div>
       </div>
+
+      <CreateTenantDialog open={createOpen} onOpenChange={setCreateOpen} />
 
       {isLoading ? (
         <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>

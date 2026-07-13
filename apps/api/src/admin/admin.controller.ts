@@ -1,5 +1,10 @@
-import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
-import { adminUpdateTurnoSchema, type AdminUpdateTurnoInput } from '@soytuturno/shared';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  adminUpdateTurnoSchema,
+  adminCreateTenantSchema,
+  type AdminUpdateTurnoInput,
+  type AdminCreateTenantInput,
+} from '@soytuturno/shared';
 import { SuperAdminGuard } from '@/auth/super-admin.guard';
 import { SuperAdminEndpoint } from '@/auth/decorators/super-admin.decorator';
 import { ZodValidationPipe } from '@/common/pipes/zod-validation.pipe';
@@ -14,6 +19,13 @@ export class AdminController {
   @Get('tenants')
   async listTenants() {
     return { ok: true, data: await this.service.listTenants() };
+  }
+
+  @Post('tenants')
+  async createTenant(
+    @Body(new ZodValidationPipe(adminCreateTenantSchema)) body: AdminCreateTenantInput,
+  ) {
+    return { ok: true, data: await this.service.createTenant(body) };
   }
 
   @Patch('tenants/:id/turno')

@@ -170,6 +170,24 @@ export type UpdateTurnoSettingsInput = z.infer<typeof updateTurnoSettingsSchema>
 // ─────────────────────────────────────────────────────────────
 // Superadmin: activar el turnero por comercio + config
 // ─────────────────────────────────────────────────────────────
+/** Alta de un comercio nuevo desde el superadmin (crea tenant + invita al dueño). */
+export const adminCreateTenantSchema = z.object({
+  name: z.string().trim().min(1, 'Poné el nombre del comercio').max(120),
+  slug: z
+    .string()
+    .trim()
+    .min(2, 'Mínimo 2 caracteres')
+    .max(40)
+    .regex(/^[a-z0-9-]+$/, 'Solo minúsculas, números y guiones'),
+  ownerEmail: z.string().email('Email inválido'),
+  ownerName: z.string().trim().max(120).optional(),
+  phone: z.string().trim().max(40).optional(),
+  timezone: z.string().trim().min(1).max(64).optional(),
+  // A dónde vuelve el dueño tras aceptar la invitación (lo arma el front).
+  redirectTo: z.string().url().optional(),
+});
+export type AdminCreateTenantInput = z.infer<typeof adminCreateTenantSchema>;
+
 export const adminUpdateTurnoSchema = z.object({
   enabled: z.boolean(),
   timezone: z.string().trim().min(1).max(64).optional(),
