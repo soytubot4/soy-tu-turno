@@ -1,5 +1,40 @@
+'use client';
+
 import { Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+/** Selector de estrellas (1–5) clickeable para dejar una puntuación. */
+export function StarInput({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="inline-flex gap-1">
+      {Array.from({ length: 5 }).map((_, i) => {
+        const n = i + 1;
+        return (
+          <button
+            key={n}
+            type="button"
+            aria-label={`${n} estrella${n > 1 ? 's' : ''}`}
+            onClick={() => onChange(n)}
+            className="transition-transform hover:scale-110"
+          >
+            <Star
+              className={cn(
+                'h-7 w-7',
+                n <= value ? 'fill-amber-400 text-amber-400' : 'text-[var(--color-border)]',
+              )}
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 /** Muestra 1–5 estrellas + el promedio y (opcional) la cantidad de reseñas. */
 export function Stars({

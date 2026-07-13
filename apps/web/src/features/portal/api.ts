@@ -2,9 +2,11 @@
 
 import { apiFetch } from '@/lib/api';
 import { currentTenantSlug } from '@/lib/current-tenant';
-import type { PortalBookInput } from '@soytuturno/shared';
+import type { PortalBookInput, PortalReviewInput } from '@soytuturno/shared';
 
 const slug = () => currentTenantSlug();
+
+export type Rating = { avg: number | null; count: number };
 
 export type PortalInfo = {
   tenant: {
@@ -14,12 +16,20 @@ export type PortalInfo = {
     phone: string | null;
     currency: string;
   } | null;
+  rating: Rating;
   services: {
     id: string;
     name: string;
     description: string | null;
     durationMin: number;
     price: string | null;
+  }[];
+  resources: {
+    id: string;
+    name: string;
+    title: string | null;
+    avatarUrl: string | null;
+    rating: Rating;
   }[];
 };
 
@@ -38,3 +48,6 @@ export const bookPortal = (input: PortalBookInput) =>
     body: input,
     tenantSlug: slug(),
   });
+
+export const reviewPortal = (input: PortalReviewInput) =>
+  apiFetch<{ ok: boolean }>('/portal/review', { method: 'POST', body: input, tenantSlug: slug() });

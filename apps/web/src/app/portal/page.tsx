@@ -8,12 +8,15 @@ import {
   getPortalInfo,
   getPortalAvailability,
   bookPortal,
+  reviewPortal,
   type PortalInfo,
+  type Rating,
 } from '@/features/portal/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PhoneInput } from '@/components/ui/phone-input';
+import { Stars, StarInput } from '@/components/ui/stars';
 
 function todayYmd(): string {
   const d = new Date();
@@ -47,7 +50,7 @@ export default function PortalPage() {
   const [slot, setSlot] = useState<{ startAt: string; resourceId: string } | null>(null);
   const [firstName, setFirstName] = useState('');
   const [phone, setPhone] = useState('');
-  const [done, setDone] = useState<{ startAt: string } | null>(null);
+  const [done, setDone] = useState<{ startAt: string; resourceId: string; resourceName: string } | null>(null);
 
   useEffect(() => setSlot(null), [service, date]);
 
@@ -79,7 +82,10 @@ export default function PortalPage() {
         firstName: firstName.trim(),
         phone: phone.trim(),
       }),
-    onSuccess: (r) => setDone({ startAt: r.startAt }),
+    onSuccess: (r) => {
+      const prof = (info?.resources ?? []).find((x) => x.id === slot!.resourceId);
+      setDone({ startAt: r.startAt, resourceId: slot!.resourceId, resourceName: prof?.name ?? '' });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -98,7 +104,7 @@ export default function PortalPage() {
 
   if (done) {
     return (
-      <Shell name={info.tenant.name}>
+      <Shell name={info.tenant.name} rating={info.rating}>
         <div className="flex flex-col items-center gap-3 rounded-[calc(var(--radius)+0.25rem)] border border-[var(--color-border)] bg-[var(--color-card)] p-8 text-center">
           <CheckCircle2 className="h-12 w-12 text-[var(--color-success)]" />
           <h2 className="text-xl font-semibold">¡Turno reservado!</h2>
@@ -106,25 +112,34 @@ export default function PortalPage() {
             {service?.name} · {fmtLongDate(date)} a las {fmtTime(done.startAt)}.
           </p>
           <p className="text-sm text-[var(--color-muted-foreground)]">Te esperamos 🙌</p>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setDone(null);
-              setService(null);
-              setSlot(null);
-              setFirstName('');
-              setPhone('');
-            }}
-          >
-            Reservar otro turno
-          </Button>
         </div>
+
+        <ReviewForm
+          resourceId={done.resourceId}
+          resourceName={done.resourceName}
+          phone={phone}
+          authorName={firstName}
+        />
+
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => {
+            setDone(null);
+            setService(null);
+            setSlot(null);
+            setFirstName('');
+            setPhone('');
+          }}
+        >
+          Reservar otro turno
+        </Button>
       </Shell>
     );
   }
 
   return (
-    <Shell name={info.tenant.name}>
+    <Shell name={info.tenant.name} rating={info.rating}>
       {/* 1. Servicio */}
       <Section step={1} title="Elegí el servicio">
         <div className="grid gap-2">
@@ -243,11 +258,20 @@ export default function PortalPage() {
   );
 }
 
-function Shell({ name, children }: { name: string; children: React.ReactNode }) {
+function Shell({
+  name,
+  rating,
+  children,
+}: {
+  name: string;
+  rating?: Rating;
+  children: React.ReactNode;
+}) {
   return (
     <main className="mx-auto min-h-screen w-full max-w-md space-y-5 p-5">
-      <header className="pt-4 text-center">
+      <header className="flex flex-col items-center gap-1.5 pt-4 text-center">
         <h1 className="text-2xl font-bold tracking-tight">{name}</h1>
+        {rating && <Stars value={rating.avg} count={rating.count || undefined} />}
         <p className="text-sm text-[var(--color-muted-foreground)]">Reservá tu turno online</p>
       </header>
       {children}
@@ -255,6 +279,85 @@ function Shell({ name, children }: { name: string; children: React.ReactNode }) 
         con <span className="font-semibold">soytuturno</span>
       </footer>
     </main>
+  );
+}
+
+/** Reseña tras reservar: puntúa el negocio y (opcional) al profesional. */
+function ReviewForm({
+  resourceId,
+  resourceName,
+  phone,
+  authorName,
+}: {
+  resourceId: string;
+  resourceName: string;
+  phone: string;
+  authorName: string;
+}) {
+  const [businessStars, setBusinessStars] = useState(0);
+  const [profStars, setProfStars] = useState(0);
+  const [comment, setComment] = useState('');
+  const [sent, setSent] = useState(false);
+
+  const send = useMutation({
+    mutationFn: async () => {
+      await reviewPortal({
+        rating: businessStars,
+        comment: comment.trim() || undefined,
+        authorName: authorName.trim() || undefined,
+        phone: phone.trim() || undefined,
+      });
+      if (profStars > 0) {
+        await reviewPortal({
+          rating: profStars,
+          resourceId,
+          authorName: authorName.trim() || undefined,
+          phone: phone.trim() || undefined,
+        });
+      }
+    },
+    onSuccess: () => setSent(true),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (sent) {
+    return (
+      <div className="rounded-[calc(var(--radius)+0.25rem)] border border-[var(--color-border)] bg-[var(--color-card)] p-5 text-center text-sm text-[var(--color-muted-foreground)]">
+        ¡Gracias por tu reseña! 💛
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 rounded-[calc(var(--radius)+0.25rem)] border border-[var(--color-border)] bg-[var(--color-card)] p-5">
+      <p className="text-sm font-semibold">¿Cómo fue tu experiencia?</p>
+
+      <div className="flex flex-col items-center gap-1.5">
+        <span className="text-xs text-[var(--color-muted-foreground)]">El local</span>
+        <StarInput value={businessStars} onChange={setBusinessStars} />
+      </div>
+
+      {resourceName && (
+        <div className="flex flex-col items-center gap-1.5">
+          <span className="text-xs text-[var(--color-muted-foreground)]">{resourceName}</span>
+          <StarInput value={profStars} onChange={setProfStars} />
+        </div>
+      )}
+
+      <Input
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="Dejá un comentario (opcional)"
+      />
+
+      <Button
+        className="w-full"
+        onClick={() => send.mutate()}
+        disabled={businessStars === 0 || send.isPending}
+      >
+        {send.isPending ? 'Enviando…' : 'Enviar reseña'}
+      </Button>
+    </div>
   );
 }
 
