@@ -21,8 +21,11 @@ export class TeamService {
   ) {}
 
   list() {
+    const ctx = requireTenantContext();
+    // `users` es tabla COMPARTIDA sin la RLS por tenant → filtramos explícito.
     return this.prisma.tenantSafe((tx) =>
       tx.user.findMany({
+        where: { tenantId: ctx.tenantId },
         orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
         select: { id: true, email: true, fullName: true, role: true, active: true },
       }),
@@ -35,7 +38,10 @@ export class TeamService {
     const email = input.email.trim().toLowerCase();
 
     return this.prisma.tenantSafe(async (tx) => {
-      const dup = await tx.user.findFirst({ where: { email }, select: { id: true } });
+      const dup = await tx.user.findFirst({
+        where: { email, tenantId: ctx.tenantId },
+        select: { id: true },
+      });
       if (dup) throw new ConflictException('Ya hay un usuario con ese email en el comercio');
 
       const tenant = await tx.tenant.findUnique({
@@ -72,8 +78,12 @@ export class TeamService {
 
   async updateRole(id: string, input: UpdateMemberRoleInput) {
     assertCan('team:manage');
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const user = await tx.user.findFirst({ where: { id }, select: { id: true, role: true, supabaseUserId: true } });
+      const user = await tx.user.findFirst({
+        where: { id, tenantId: ctx.tenantId },
+        select: { id: true, role: true, supabaseUserId: true },
+      });
       if (!user) throw new NotFoundException('Usuario no encontrado');
       if (user.role === 'OWNER') throw new ForbiddenException('No se puede cambiar el rol del dueño');
 
@@ -91,7 +101,10 @@ export class TeamService {
     assertCan('team:manage');
     const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const user = await tx.user.findFirst({ where: { id }, select: { id: true, role: true, supabaseUserId: true } });
+      const user = await tx.user.findFirst({
+        where: { id, tenantId: ctx.tenantId },
+        select: { id: true, role: true, supabaseUserId: true },
+      });
       if (!user) throw new NotFoundException('Usuario no encontrado');
       if (user.role === 'OWNER') throw new ForbiddenException('No se puede eliminar al dueño');
       if (user.supabaseUserId === ctx.userId) {

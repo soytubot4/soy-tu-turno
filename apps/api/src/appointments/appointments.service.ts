@@ -71,7 +71,7 @@ export class AppointmentsService {
       }
 
       const customer = await tx.customer.findFirst({
-        where: { id: input.customerId },
+        where: { id: input.customerId, tenantId: ctx.tenantId },
         select: { id: true },
       });
       if (!customer) throw new NotFoundException('Cliente no encontrado');

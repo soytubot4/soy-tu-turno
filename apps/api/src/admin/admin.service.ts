@@ -140,8 +140,9 @@ export class AdminService {
     }
 
     // Guardamos los users para limpiar sus cuentas de Supabase Auth tras el borrado.
+    // `users` es tabla compartida sin RLS por tenant → filtramos explícito por id.
     const users = await this.prisma.tenantSafe(
-      (tx) => tx.user.findMany({ select: { supabaseUserId: true } }),
+      (tx) => tx.user.findMany({ where: { tenantId: id }, select: { supabaseUserId: true } }),
       id,
     );
     await this.prisma.tenant.delete({ where: { id } });

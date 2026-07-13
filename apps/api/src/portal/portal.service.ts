@@ -35,6 +35,7 @@ export class PortalService {
     const tenantId = await this.tenantId(slug);
     const base = await this.prisma.tenantSafe(async (tx) => {
       const tenant = await tx.tenant.findFirst({
+        where: { id: tenantId },
         select: { name: true, logoUrl: true, address: true, phone: true, currency: true },
       });
       const services = await tx.service.findMany({
@@ -92,7 +93,7 @@ export class PortalService {
       let customerId: string | null = null;
       if (input.phone?.trim()) {
         const c = await tx.customer.findFirst({
-          where: { phone: input.phone.trim() },
+          where: { phone: input.phone.trim(), tenantId },
           select: { id: true },
         });
         customerId = c?.id ?? null;
@@ -183,7 +184,11 @@ export class PortalService {
 
   private async findOrCreateCustomer(tx: Tx, tenantId: string, input: PortalBookInput) {
     const phone = input.phone.trim();
-    const existing = await tx.customer.findFirst({ where: { phone }, select: { id: true } });
+    // `customers` es tabla compartida sin RLS por tenant → filtramos explícito.
+    const existing = await tx.customer.findFirst({
+      where: { phone, tenantId },
+      select: { id: true },
+    });
     if (existing) return existing;
     return tx.customer.create({
       data: {

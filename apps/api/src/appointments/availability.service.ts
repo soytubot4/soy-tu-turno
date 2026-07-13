@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { AvailabilityQuery } from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
+import { getTenantContext } from '@/prisma/tenant-context';
 import {
   dayOfWeekInTz,
   hhmmToMinutes,
@@ -32,7 +33,8 @@ export class AvailabilityService {
    * `tenantIdOverride` lo usa el portal público, que no tiene tenant context.
    */
   getSlots(query: AvailabilityQuery, tenantIdOverride?: string): Promise<Slot[]> {
-    return this.prisma.tenantSafe((tx) => this.computeSlots(tx, query), tenantIdOverride);
+    const tenantId = tenantIdOverride ?? getTenantContext()?.tenantId;
+    return this.prisma.tenantSafe((tx) => this.computeSlots(tx, query, tenantId), tenantIdOverride);
   }
 
   /** Reutilizable: ¿el instante `startAt` cae en un slot libre para el recurso? */
@@ -41,8 +43,11 @@ export class AvailabilityService {
     return slots.some((s) => s.startAt === startAtIso && s.resourceId === query.resourceId);
   }
 
-  private async computeSlots(tx: Tx, query: AvailabilityQuery): Promise<Slot[]> {
-    const tenant = await tx.tenant.findFirst({ select: { turnoConfig: true } });
+  private async computeSlots(tx: Tx, query: AvailabilityQuery, tenantId?: string): Promise<Slot[]> {
+    const tenant = await tx.tenant.findFirst({
+      where: tenantId ? { id: tenantId } : undefined,
+      select: { turnoConfig: true },
+    });
     const tz = tenantTimezone(tenant?.turnoConfig);
     const { slotStepMin, minLeadMinutes } = readTurnoConfig(tenant?.turnoConfig);
 
