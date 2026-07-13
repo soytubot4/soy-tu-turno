@@ -198,7 +198,7 @@ export default function PortalPage() {
       {/* 3. Datos + confirmar */}
       {service && slot && (
         <Section step={3} title="Tus datos">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-3">
             <div className="flex flex-col gap-1.5">
               <Label>Nombre</Label>
               <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Tu nombre" />
