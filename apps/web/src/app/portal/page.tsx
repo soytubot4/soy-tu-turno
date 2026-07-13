@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CalendarCheck, Clock, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
@@ -43,6 +43,7 @@ export default function PortalPage() {
 
   const [service, setService] = useState<Service | null>(null);
   const [date, setDate] = useState(todayYmd());
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const [slot, setSlot] = useState<{ startAt: string; resourceId: string } | null>(null);
   const [firstName, setFirstName] = useState('');
   const [phone, setPhone] = useState('');
@@ -166,7 +167,27 @@ export default function PortalPage() {
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="flex-1 text-center text-sm font-medium capitalize">{fmtLongDate(date)}</span>
+            <div className="relative flex-1">
+              <button
+                type="button"
+                onClick={() => dateInputRef.current?.showPicker?.()}
+                className="w-full rounded-[var(--radius)] py-1.5 text-center text-sm font-medium capitalize hover:bg-[var(--color-accent)]"
+                title="Elegí una fecha"
+              >
+                {fmtLongDate(date)}
+              </button>
+              <input
+                ref={dateInputRef}
+                type="date"
+                value={date}
+                min={todayYmd()}
+                max={shiftYmd(todayYmd(), 30)}
+                onChange={(e) => e.target.value && setDate(e.target.value)}
+                aria-hidden
+                tabIndex={-1}
+                className="pointer-events-none absolute bottom-0 left-1/2 h-0 w-0 opacity-0"
+              />
+            </div>
             <Button variant="outline" size="icon" onClick={() => setDate(shiftYmd(date, 1))}>
               <ChevronRight className="h-4 w-4" />
             </Button>
