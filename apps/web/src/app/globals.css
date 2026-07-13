@@ -1,45 +1,46 @@
 @import "tailwindcss";
 
 /* ───────────────────────────────────────────────────────────────────────────
-   Tema soytuturno — dark + dorado, fuente Outfit (misma marca que el ecosistema).
-   Tokens semánticos de shadcn mapeados a la paleta, así todos los componentes
-   salen on-brand sin tocarlos. App dark-first.
+   Tema soytuturno — claro y minimal (distinto de soyuadmin, que es dark+dorado).
+   Blanco/gris muy suave + negro suave (no #000). Acento NEUTRO (near-black) para
+   CTAs, estilo Linear/Vercel. Buen contraste (AA), bordes finos, jerarquía por
+   tipografía y espacio más que por color.
    ─────────────────────────────────────────────────────────────────────────── */
 @theme {
   --font-sans: "Outfit", system-ui, -apple-system, sans-serif;
   --radius: 0.75rem;
 
   /* superficies */
-  --color-background: #0a0a0a;
-  --color-foreground: #f0f0f0;
-  --color-card: #141414;
-  --color-card-foreground: #f0f0f0;
-  --color-popover: #141414;
-  --color-popover-foreground: #f0f0f0;
+  --color-background: #f7f7f8;
+  --color-foreground: #1c1c1e; /* negro suave, no #000 */
+  --color-card: #ffffff;
+  --color-card-foreground: #1c1c1e;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1c1c1e;
 
-  /* marca — dorado como primary (CTAs) */
-  --color-primary: #c8943a;
-  --color-primary-foreground: #0a0a0a;
+  /* marca / CTAs — acento NEUTRO (near-black sobre blanco) */
+  --color-primary: #1c1c1e;
+  --color-primary-foreground: #fafafa;
 
-  --color-secondary: #1a1a1a;
-  --color-secondary-foreground: #f0f0f0;
+  --color-secondary: #f0f0f1;
+  --color-secondary-foreground: #1c1c1e;
 
-  --color-muted: #1a1a1a;
-  --color-muted-foreground: #888888;
+  --color-muted: #f0f0f1;
+  --color-muted-foreground: #6e6e76; /* gris neutro para texto secundario (AA) */
 
-  --color-accent: #242424;
-  --color-accent-foreground: #f0f0f0;
+  --color-accent: #efeff0;
+  --color-accent-foreground: #1c1c1e;
 
-  /* estados */
-  --color-destructive: #f87171;
-  --color-destructive-foreground: #0a0a0a;
-  --color-success: #4ade80;
-  --color-warning: #fbbf24;
+  /* estados (usados con moderación) */
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-success: #16a34a;
+  --color-warning: #b45309;
 
-  /* bordes / inputs / focus ring (dorado) */
-  --color-border: #2a2a2a;
-  --color-input: #2a2a2a;
-  --color-ring: #c8943a;
+  /* bordes / inputs / focus ring — neutros */
+  --color-border: #e5e5e8;
+  --color-input: #e5e5e8;
+  --color-ring: #a1a1aa;
 }
 
 @layer base {
@@ -54,13 +55,14 @@
   }
   html {
     scrollbar-width: thin;
-    scrollbar-color: #333 transparent;
+    scrollbar-color: #c7c7cc transparent;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
   a {
     cursor: pointer;
   }
+  /* Sin flechitas (spinners) en los inputs numéricos */
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;

@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PhoneInput } from '@/components/ui/phone-input';
 
 function todayYmd(): string {
   const d = new Date();
@@ -199,7 +200,7 @@ export default function PortalPage() {
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Teléfono (WhatsApp)</Label>
-              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="09xx xxx xxx" />
+              <PhoneInput onChange={setPhone} placeholder="341 1234567" />
             </div>
           </div>
           <Button

@@ -23,6 +23,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PhoneInput } from '@/components/ui/phone-input';
 
 const selectCls =
   'flex h-9 w-full rounded-[var(--radius)] border border-[var(--color-input)] bg-[var(--color-background)] px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-ring)]';
@@ -245,11 +246,11 @@ function CustomerPicker({
       </div>
 
       {creating ? (
-        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <div className="grid gap-2">
           <Input placeholder="Nombre" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-          <Input placeholder="Teléfono (opcional)" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <PhoneInput onChange={setPhone} placeholder="Teléfono" />
           <Button onClick={() => create.mutate()} disabled={create.isPending || !firstName.trim()}>
-            Crear
+            Crear cliente
           </Button>
         </div>
       ) : (
