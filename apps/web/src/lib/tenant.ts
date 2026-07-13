@@ -72,8 +72,9 @@ function protocol(): string {
 }
 
 function withPort(hostname: string): string {
+  // En dev se setea NEXT_PUBLIC_WEB_PORT (ej. 3200); en prod no, y no se agrega.
   const port = process.env.NEXT_PUBLIC_WEB_PORT;
-  return port && getRootDomain() === 'localhost' ? `${hostname}:${port}` : hostname;
+  return port ? `${hostname}:${port}` : hostname;
 }
 
 /** soytuturno.com — landing */

@@ -1,12 +1,18 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- soyTuTurno — tablas de turnos sobre la DB compartida.
 -- Correr en el SQL editor de Supabase (mismo proyecto que soytucanje/soyuadmin).
--- Idempotente. Las tablas compartidas (tenants/users/customers/admin_users) NO
--- se tocan — ya existen.
+-- Idempotente. Las tablas compartidas se tocan SOLO para agregar columnas nuevas
+-- (ADD COLUMN IF NOT EXISTS, retrocompatible: los otros apps las ignoran).
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- Necesaria para la exclusion constraint (rangos + igualdad en el mismo índice).
 CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+-- ─── Columnas nuevas en la tabla COMPARTIDA "tenants" ───
+-- soytuturno guarda su config por comercio (zona horaria, anticipación, etc.) en
+-- tenants.turno_config. `currency` puede ya existir; el IF NOT EXISTS lo respeta.
+ALTER TABLE "tenants" ADD COLUMN IF NOT EXISTS "turno_config" JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE "tenants" ADD COLUMN IF NOT EXISTS "currency" TEXT NOT NULL DEFAULT 'ARS';
 
 -- Helper de RLS (ya existe en la DB compartida; lo dejamos por idempotencia).
 CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS uuid

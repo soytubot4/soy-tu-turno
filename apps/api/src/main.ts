@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -42,7 +42,8 @@ async function bootstrap() {
     credentials: true,
   });
 
-  app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+  // La validación se hace con Zod (ZodValidationPipe por endpoint), no con
+  // class-validator, así que no registramos el ValidationPipe global.
   app.useGlobalFilters(new AllExceptionsFilter());
   app.setGlobalPrefix('v1');
 
