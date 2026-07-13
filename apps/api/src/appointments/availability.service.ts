@@ -27,9 +27,12 @@ function readTurnoConfig(turnoConfig: unknown) {
 export class AvailabilityService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Slots libres para un servicio en una fecha (opcional filtrando por recurso). */
-  getSlots(query: AvailabilityQuery): Promise<Slot[]> {
-    return this.prisma.tenantSafe((tx) => this.computeSlots(tx, query));
+  /**
+   * Slots libres para un servicio en una fecha (opcional filtrando por recurso).
+   * `tenantIdOverride` lo usa el portal público, que no tiene tenant context.
+   */
+  getSlots(query: AvailabilityQuery, tenantIdOverride?: string): Promise<Slot[]> {
+    return this.prisma.tenantSafe((tx) => this.computeSlots(tx, query), tenantIdOverride);
   }
 
   /** Reutilizable: ¿el instante `startAt` cae en un slot libre para el recurso? */

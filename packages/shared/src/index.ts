@@ -139,6 +139,31 @@ export const createCustomerSchema = z.object({
 });
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 
+// ─────────────────────────────────────────────────────────────
+// Portal público del cliente (reserva self-service)
+// ─────────────────────────────────────────────────────────────
+export const portalBookSchema = z.object({
+  serviceId: z.string().uuid(),
+  resourceId: z.string().uuid(),
+  startAt: z.string().datetime(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida'),
+  firstName: z.string().trim().min(1, 'Poné tu nombre').max(120),
+  lastName: z.string().trim().max(120).optional(),
+  phone: z.string().trim().min(5, 'Poné un teléfono válido').max(40),
+});
+export type PortalBookInput = z.infer<typeof portalBookSchema>;
+
+// ─────────────────────────────────────────────────────────────
+// Superadmin: activar el turnero por comercio + config
+// ─────────────────────────────────────────────────────────────
+export const adminUpdateTurnoSchema = z.object({
+  enabled: z.boolean(),
+  timezone: z.string().trim().min(1).max(64).optional(),
+  slotStepMin: z.coerce.number().int().min(5).max(120).optional(),
+  minLeadMinutes: z.coerce.number().int().min(0).max(10080).optional(),
+});
+export type AdminUpdateTurnoInput = z.infer<typeof adminUpdateTurnoSchema>;
+
 // Paginación estándar (igual que el resto del ecosistema).
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
