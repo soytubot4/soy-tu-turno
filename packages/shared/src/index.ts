@@ -154,6 +154,20 @@ export const portalBookSchema = z.object({
 export type PortalBookInput = z.infer<typeof portalBookSchema>;
 
 // ─────────────────────────────────────────────────────────────
+// Config de turnos del comercio (la edita el propio OWNER/MANAGER)
+// ─────────────────────────────────────────────────────────────
+/** Intervalos posibles para ofrecer turnos (minutos). */
+export const SLOT_STEP_OPTIONS = [10, 15, 20, 30, 45, 60] as const;
+
+export const updateTurnoSettingsSchema = z.object({
+  // Cada cuánto se ofrecen turnos: 08:00, 08:30, 09:00… (según el paso).
+  slotStepMin: z.coerce.number().int().min(5).max(240).optional(),
+  // Anticipación mínima para reservar (minutos desde ahora).
+  minLeadMinutes: z.coerce.number().int().min(0).max(10080).optional(),
+});
+export type UpdateTurnoSettingsInput = z.infer<typeof updateTurnoSettingsSchema>;
+
+// ─────────────────────────────────────────────────────────────
 // Superadmin: activar el turnero por comercio + config
 // ─────────────────────────────────────────────────────────────
 export const adminUpdateTurnoSchema = z.object({

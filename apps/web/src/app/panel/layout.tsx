@@ -6,11 +6,13 @@ import { CalendarDays, Scissors, Users, Clock, LogOut } from 'lucide-react';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 
+// Paths LIMPIOS (los que ve el navegador). El middleware reescribe a /panel/*
+// internamente, así que usePathname() devuelve estos, no el /panel interno.
 const NAV = [
-  { href: '/panel', label: 'Agenda', icon: CalendarDays },
-  { href: '/panel/servicios', label: 'Servicios', icon: Scissors },
-  { href: '/panel/equipo', label: 'Equipo', icon: Users },
-  { href: '/panel/horarios', label: 'Horarios', icon: Clock },
+  { href: '/', label: 'Agenda', icon: CalendarDays, exact: true },
+  { href: '/servicios', label: 'Servicios', icon: Scissors },
+  { href: '/equipo', label: 'Equipo', icon: Users },
+  { href: '/horarios', label: 'Horarios', icon: Clock },
 ];
 
 export default function PanelLayout({ children }: { children: React.ReactNode }) {
@@ -30,8 +32,8 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
           soy<span className="text-[var(--color-primary)]">tuturno</span>
         </div>
         <nav className="flex-1 space-y-1 px-3">
-          {NAV.map(({ href, label, icon: Icon }) => {
-            const active = href === '/panel' ? pathname === '/panel' : pathname.startsWith(href);
+          {NAV.map(({ href, label, icon: Icon, exact }) => {
+            const active = exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
             return (
               <Link
                 key={href}

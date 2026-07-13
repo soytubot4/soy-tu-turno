@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, CalendarOff } from 'lucide-react';
-import { DAY_LABELS, type HourRange } from '@soytuturno/shared';
+import { DAY_LABELS, SLOT_STEP_OPTIONS, type HourRange } from '@soytuturno/shared';
 import { listResources } from '@/features/equipo/api';
 import {
   getSchedule,
@@ -13,6 +13,7 @@ import {
   createBlock,
   deleteBlock,
 } from '@/features/horarios/api';
+import { getTurnoSettings, updateTurnoSettings } from '@/features/horarios/settings-api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -50,6 +51,8 @@ export default function HorariosPage() {
         </p>
       </div>
 
+      <SlotStepCard />
+
       {(resources ?? []).length > 1 && (
         <div className="flex flex-wrap gap-2">
           {resources!.map((r) => (
@@ -75,6 +78,63 @@ export default function HorariosPage() {
 
       <BlocksCard qc={qc} />
     </div>
+  );
+}
+
+function SlotStepCard() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const [step, setStep] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (data) setStep(data.slotStepMin);
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () => updateTurnoSettings({ slotStepMin: step! }),
+    onSuccess: () => {
+      toast.success('Intervalo guardado');
+      qc.invalidateQueries({ queryKey: ['turno-settings'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const dirty = !!data && step != null && step !== data.slotStepMin;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Intervalo de turnos</CardTitle>
+        <CardDescription>
+          Cada cuánto puede arrancar un turno. Ej: cada 30 min → 08:00, 08:30, 09:00…
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading || step == null ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            {SLOT_STEP_OPTIONS.map((opt) => (
+              <Button
+                key={opt}
+                variant={step === opt ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setStep(opt)}
+              >
+                {opt} min
+              </Button>
+            ))}
+            <Button
+              className="ml-auto"
+              onClick={() => save.mutate()}
+              disabled={!dirty || save.isPending}
+            >
+              {save.isPending ? 'Guardando…' : 'Guardar'}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
