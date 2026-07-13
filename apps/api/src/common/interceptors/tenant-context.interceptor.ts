@@ -57,13 +57,30 @@ export class TenantContextInterceptor implements NestInterceptor {
       tenantId = tenant.id;
     }
 
+    // El SUPERADMIN del ecosistema tiene acceso total en CUALQUIER comercio.
+    // Su token no trae rol de tenant, así que lo resolvemos contra admin_users
+    // (solo cuando no vino un rol en el JWT → no penaliza a los usuarios normales).
+    let role = user.role ?? 'CASHIER';
+    let userIsSuperAdmin = false;
+    if (!user.role) {
+      const admin = await this.prisma.adminUser.findUnique({
+        where: { supabaseUserId: user.id },
+        select: { type: true, active: true },
+      });
+      if (admin?.active && admin.type === 'SUPERADMIN') {
+        role = 'OWNER';
+        userIsSuperAdmin = true;
+      }
+    }
+
     return from(
       new Promise<Observable<unknown>>((resolve) => {
         tenantStorage.run(
           {
             tenantId: tenantId!,
             userId: user.id,
-            role: user.role ?? 'CASHIER',
+            role,
+            isSuperAdmin: userIsSuperAdmin,
             email: user.email ?? undefined,
           },
           () => resolve(next.handle()),

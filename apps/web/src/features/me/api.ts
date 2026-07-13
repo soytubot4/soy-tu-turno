@@ -14,6 +14,7 @@ export type Me = {
   roleLabel: string;
   capabilities: TurnoCapability[];
   isOwner: boolean;
+  isSuperAdmin: boolean;
 };
 
 export const getMe = () => apiFetch<Me>('/me', { tenantSlug: slug() });

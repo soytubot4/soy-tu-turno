@@ -14,9 +14,10 @@ export class MeController {
         userId: ctx.userId,
         email: ctx.email ?? null,
         role: ctx.role,
-        roleLabel: ROLE_LABELS[ctx.role] ?? ctx.role,
+        roleLabel: ctx.isSuperAdmin ? 'Superadmin' : ROLE_LABELS[ctx.role] ?? ctx.role,
         capabilities: capabilitiesFor(ctx.role),
         isOwner: ctx.role === 'OWNER',
+        isSuperAdmin: !!ctx.isSuperAdmin,
       },
     };
   }

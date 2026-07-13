@@ -5,6 +5,8 @@ export type TenantContext = {
   userId: string;
   /** Rol del user en el comercio (OWNER/MANAGER/CASHIER/VIEWER/PENDING…). */
   role: string;
+  /** True si es el SUPERADMIN del ecosistema (acceso total a cualquier comercio). */
+  isSuperAdmin?: boolean;
   /** Email del user (snapshot). Opcional: tokens viejos quizás no lo traen. */
   email?: string;
 };
