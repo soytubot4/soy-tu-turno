@@ -37,7 +37,9 @@ export default function AdminPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-            soy<span className="text-[var(--color-primary)]">tuturno</span> · superadmin
+            soy<span className="text-[var(--color-primary)]">tuturno</span>
+            <span className="mx-2 inline-block h-1.5 w-1.5 rounded-full bg-current align-middle" />
+            superadmin
           </h1>
           <p className="text-sm text-[var(--color-muted-foreground)]">
             Activá el turnero por comercio y configurá su zona horaria.
