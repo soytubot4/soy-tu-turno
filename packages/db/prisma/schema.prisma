@@ -1,0 +1,324 @@
+// soyTuTurno — SaaS multi-tenant de turnos/agenda.
+// Comparte la MISMA base Postgres que soytucanje/soyuadmin (tenants, users,
+// admin_users, customers). Aislamiento por tenant vía RLS (current_tenant_id()).
+//
+// IMPORTANTE: los modelos "compartidos" (Tenant, User, AdminUser, Customer) son
+// un subset de las columnas reales de la DB compartida. NO corremos `prisma
+// migrate` contra la DB compartida: las tablas nuevas de turnos se crean con el
+// SQL manual (packages/db/sql/01-turnos.sql). Prisma se usa solo para el Client.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [pgcrypto, btree_gist]
+}
+
+// ─────────────────────────────────────────────────────────────
+// Enums compartidos (deben incluir TODOS los valores del enum de la DB
+// compartida, aunque acá no se usen — si no, Prisma rompe al leer una fila).
+// ─────────────────────────────────────────────────────────────
+
+enum BusinessType {
+  PELUQUERIA
+  FARMACIA
+  KIOSCO
+  RESTAURANT
+  GIMNASIO
+  OTRO
+  ALMACEN
+  INDUMENTARIA
+  FERRETERIA
+  ECOMMERCE
+}
+
+enum UserRole {
+  PENDING
+  OWNER
+  MANAGER
+  CASHIER
+  STOCK_OPERATOR
+  VIEWER
+}
+
+enum AdminUserType {
+  SUPERADMIN
+  TENANT_ADMIN
+}
+
+enum DomainProvisioningStatus {
+  PENDING
+  PROVISIONED
+  FAILED
+  NOT_APPLICABLE
+}
+
+// ─────────────────────────────────────────────────────────────
+// Enums de turnos (nuevos)
+// ─────────────────────────────────────────────────────────────
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentSource {
+  ADMIN
+  WEB
+  WHATSAPP
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tablas COMPARTIDAS (subset — no las creamos, ya existen)
+// ─────────────────────────────────────────────────────────────
+
+model Tenant {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug         String       @unique
+  name         String
+  businessType BusinessType @default(OTRO) @map("business_type")
+  active       Boolean      @default(true)
+
+  enabledProducts String[] @default([]) @map("enabled_products")
+
+  address    String?
+  phone      String?
+  ownerName  String? @map("owner_name")
+  ownerEmail String? @map("owner_email")
+  logoUrl    String? @map("logo_url")
+
+  whatsappConfig Json @default("{}") @map("whatsapp_config")
+  featureFlags   Json @default("{}") @map("feature_flags")
+  // Config del turnero por tenant (ej: zona horaria, anticipación mínima).
+  turnoConfig    Json @default("{}") @map("turno_config")
+  currency       String @default("ARS")
+
+  staffDomainStatus    DomainProvisioningStatus @default(PENDING)        @map("staff_domain_status")
+  customerDomainStatus DomainProvisioningStatus @default(NOT_APPLICABLE) @map("customer_domain_status")
+  domainError          String?                                          @map("domain_error")
+  domainProvisionedAt  DateTime?                                        @map("domain_provisioned_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users        User[]
+  customers    Customer[]
+  adminUsers   AdminUser[]
+  // turnos
+  services     Service[]
+  resources    Resource[]
+  appointments Appointment[]
+
+  @@map("tenants")
+}
+
+model User {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  supabaseUserId  String    @unique @map("supabase_user_id") @db.Uuid
+  email           String
+  fullName        String?   @map("full_name")
+  role            UserRole  @default(PENDING)
+  active          Boolean   @default(true)
+  changelogSeenId Int       @default(0) @map("changelog_seen_id")
+  lastLoginAt     DateTime? @map("last_login_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  resources Resource[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+model AdminUser {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  supabaseUserId    String        @unique @map("supabase_user_id") @db.Uuid
+  email             String        @unique
+  fullName          String?       @map("full_name")
+  type              AdminUserType
+  belongsToTenantId String?       @map("belongs_to_tenant_id") @db.Uuid
+  active            Boolean       @default(true)
+  lastLoginAt       DateTime?     @map("last_login_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  belongsToTenant Tenant? @relation(fields: [belongsToTenantId], references: [id], onDelete: Cascade)
+
+  @@index([type])
+  @@index([belongsToTenantId])
+  @@map("admin_users")
+}
+
+model Customer {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+
+  phone         String?
+  dni           String?
+  firstName     String?   @map("first_name")
+  lastName      String?   @map("last_name")
+  birthDate     DateTime? @map("birth_date") @db.Date
+  email         String?
+
+  pointsBalance Int      @default(0) @map("points_balance")
+  totalSpent    Decimal  @default(0) @map("total_spent") @db.Decimal(14, 2)
+  lastPurchaseAt DateTime? @map("last_purchase_at")
+
+  optedInWhatsapp Boolean @default(true) @map("opted_in_whatsapp")
+  notes         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@unique([tenantId, phone])
+  @@unique([tenantId, dni])
+  @@index([tenantId, phone])
+  @@index([tenantId, dni])
+  @@map("customers")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tablas NUEVAS de turnos (se crean con sql/01-turnos.sql, con RLS)
+// ─────────────────────────────────────────────────────────────
+
+/// Servicio ofrecido (corte, consulta, etc.). Duración fija en minutos.
+model Service {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String
+  description String?
+  durationMin Int      @map("duration_min")
+  price       Decimal? @db.Decimal(14, 2)
+  color       String? // color del chip en el calendario
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  resources    ResourceService[]
+  appointments Appointment[]
+
+  @@index([tenantId])
+  @@map("services")
+}
+
+/// El que atiende: profesional / box / silla (recurso con agenda propia).
+model Resource {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  name      String
+  title     String? // ej: "Barbero", "Estilista" (subtítulo en la ficha del equipo)
+  avatarUrl String?  @map("avatar_url")
+  color     String?
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0) @map("sort_order")
+  // Opcional: vincular a un usuario del sistema (ej. el peluquero que se loguea).
+  userId    String?  @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user         User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  services     ResourceService[]
+  schedules    ResourceSchedule[]
+  blocks       ScheduleBlock[]
+  appointments Appointment[]
+
+  @@index([tenantId])
+  @@map("resources")
+}
+
+/// N:N — qué servicios ofrece cada recurso. tenantId sin relación Prisma (RLS por columna).
+model ResourceService {
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  resourceId String @map("resource_id") @db.Uuid
+  serviceId  String @map("service_id") @db.Uuid
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  service  Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, serviceId])
+  @@index([tenantId])
+  @@map("resource_services")
+}
+
+/// Horario semanal de atención por recurso. dayOfWeek: 0=Domingo … 6=Sábado
+/// (igual que JS getDay / Postgres DOW). ranges = franjas [{from,to}] (horario cortado).
+model ResourceSchedule {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  resourceId String   @map("resource_id") @db.Uuid
+  dayOfWeek  Int      @map("day_of_week")
+  ranges     Json     @default("[]")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, dayOfWeek])
+  @@index([tenantId])
+  @@map("resource_schedules")
+}
+
+/// Excepción de agenda: feriado / bloqueo / vacaciones. resourceId null = todo el local.
+model ScheduleBlock {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  resourceId String?   @map("resource_id") @db.Uuid
+  date       DateTime  @db.Date
+  allDay     Boolean   @default(true) @map("all_day")
+  startAt    DateTime? @map("start_at") @db.Timestamptz(3)
+  endAt      DateTime? @map("end_at") @db.Timestamptz(3)
+  reason     String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  resource Resource? @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, date])
+  @@map("schedule_blocks")
+}
+
+/// El turno. La exclusion constraint (sql) impide solapamientos por recurso.
+model Appointment {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String            @map("tenant_id") @db.Uuid
+  customerId String            @map("customer_id") @db.Uuid
+  resourceId String            @map("resource_id") @db.Uuid
+  serviceId  String            @map("service_id") @db.Uuid
+  startAt    DateTime          @map("start_at") @db.Timestamptz(3)
+  endAt      DateTime          @map("end_at") @db.Timestamptz(3)
+  status     AppointmentStatus @default(PENDING)
+  source     AppointmentSource @default(ADMIN)
+  // Precio congelado al momento de reservar (el del servicio puede cambiar después).
+  priceAtBooking Decimal?      @map("price_at_booking") @db.Decimal(14, 2)
+  notes      String?
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+  service  Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, startAt])
+  @@index([tenantId, resourceId, startAt])
+  @@map("appointments")
+}

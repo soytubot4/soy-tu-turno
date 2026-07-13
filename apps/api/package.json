@@ -1,0 +1,38 @@
+{
+  "name": "@soytuturno/api",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "start": "node dist/main.js",
+    "lint": "eslint \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/config": "^3.3.0",
+    "@nestjs/core": "^11.0.1",
+    "@nestjs/platform-express": "^11.0.1",
+    "@soytuturno/db": "workspace:*",
+    "@soytuturno/shared": "workspace:*",
+    "helmet": "^8.0.0",
+    "jose": "^5.9.6",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "ts-loader": "^9.5.1",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.6.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@nestjs/schematics": "^11.0.0",
+    "@nestjs/testing": "^11.0.1",
+    "@types/express": "^5.0.0",
+    "@types/node": "^20.16.10",
+    "eslint": "^9.13.0"
+  }
+}

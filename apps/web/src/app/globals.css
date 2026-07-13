@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Tema soytuturno — dark + dorado, fuente Outfit (misma marca que el ecosistema).
+   Tokens semánticos de shadcn mapeados a la paleta, así todos los componentes
+   salen on-brand sin tocarlos. App dark-first.
+   ─────────────────────────────────────────────────────────────────────────── */
+@theme {
+  --font-sans: "Outfit", system-ui, -apple-system, sans-serif;
+  --radius: 0.75rem;
+
+  /* superficies */
+  --color-background: #0a0a0a;
+  --color-foreground: #f0f0f0;
+  --color-card: #141414;
+  --color-card-foreground: #f0f0f0;
+  --color-popover: #141414;
+  --color-popover-foreground: #f0f0f0;
+
+  /* marca — dorado como primary (CTAs) */
+  --color-primary: #c8943a;
+  --color-primary-foreground: #0a0a0a;
+
+  --color-secondary: #1a1a1a;
+  --color-secondary-foreground: #f0f0f0;
+
+  --color-muted: #1a1a1a;
+  --color-muted-foreground: #888888;
+
+  --color-accent: #242424;
+  --color-accent-foreground: #f0f0f0;
+
+  /* estados */
+  --color-destructive: #f87171;
+  --color-destructive-foreground: #0a0a0a;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+
+  /* bordes / inputs / focus ring (dorado) */
+  --color-border: #2a2a2a;
+  --color-input: #2a2a2a;
+  --color-ring: #c8943a;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: #333 transparent;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a {
+    cursor: pointer;
+  }
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+}
