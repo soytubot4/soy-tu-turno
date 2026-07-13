@@ -172,12 +172,13 @@ export default function PortalPage() {
               No hay horarios libres ese día. Probá otra fecha.
             </p>
           ) : (
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
               {uniqueSlots.map((s) => (
                 <Button
                   key={s.startAt}
                   variant={slot?.startAt === s.startAt ? 'default' : 'outline'}
                   size="sm"
+                  className="w-full"
                   onClick={() => setSlot(s)}
                 >
                   {fmtTime(s.startAt)}
