@@ -1,14 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CreateScheduleBlockInput } from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
 import { requireTenantContext } from '@/prisma/tenant-context';
+import { assertCan } from '@/auth/capabilities';
 
-function assertCanWrite() {
-  const { role } = requireTenantContext();
-  if (role !== 'OWNER' && role !== 'MANAGER') {
-    throw new ForbiddenException('No tenés permiso para esta acción');
-  }
-}
+const assertCanWrite = () => assertCan('schedule:write');
 
 @Injectable()
 export class BlocksService {

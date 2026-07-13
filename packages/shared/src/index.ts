@@ -5,6 +5,80 @@ import { z } from 'zod';
 // ─────────────────────────────────────────────────────────────
 export const TURNO_FEATURE_KEY = 'soytuturno';
 
+// ─────────────────────────────────────────────────────────────
+// Roles y permisos (RBAC del panel)
+// ─────────────────────────────────────────────────────────────
+/** Permisos gateables. Cada mutación del panel exige uno. */
+export const TURNO_CAPABILITIES = [
+  'appointments:write', // crear / editar / cancelar turnos (agenda)
+  'services:write', // gestionar servicios
+  'resources:write', // gestionar el equipo (profesionales)
+  'schedule:write', // horarios y bloqueos
+  'settings:write', // config del turnero
+  'team:manage', // invitar / gestionar usuarios y sus roles
+] as const;
+export type TurnoCapability = (typeof TURNO_CAPABILITIES)[number];
+
+/** Roles asignables a un usuario del comercio. */
+export const TURNO_ROLES = ['OWNER', 'MANAGER', 'CASHIER', 'VIEWER'] as const;
+export type TurnoRole = (typeof TURNO_ROLES)[number];
+
+/** Roles que se pueden asignar desde la UI (OWNER se gestiona aparte). */
+export const ASSIGNABLE_ROLES = ['MANAGER', 'CASHIER', 'VIEWER'] as const;
+
+export const ROLE_LABELS: Record<string, string> = {
+  OWNER: 'Dueño',
+  MANAGER: 'Administrador',
+  CASHIER: 'Recepcionista',
+  VIEWER: 'Solo lectura',
+  PENDING: 'Pendiente',
+  STOCK_OPERATOR: 'Operador',
+};
+
+export const ROLE_DESCRIPTIONS: Record<string, string> = {
+  MANAGER: 'Gestiona servicios, equipo, horarios, turnos y configuración.',
+  CASHIER: 'Solo la agenda: crea y cancela turnos.',
+  VIEWER: 'Ve todo, no puede editar nada.',
+};
+
+/** Qué permisos tiene cada rol. OWNER siempre tiene todos. */
+export const ROLE_CAPABILITIES: Record<string, TurnoCapability[]> = {
+  OWNER: [...TURNO_CAPABILITIES],
+  MANAGER: [
+    'appointments:write',
+    'services:write',
+    'resources:write',
+    'schedule:write',
+    'settings:write',
+  ],
+  CASHIER: ['appointments:write'],
+  VIEWER: [],
+  PENDING: [],
+  STOCK_OPERATOR: [],
+};
+
+export function capabilitiesFor(role: string | null | undefined): TurnoCapability[] {
+  return (role && ROLE_CAPABILITIES[role]) || [];
+}
+
+export function roleCan(role: string | null | undefined, cap: TurnoCapability): boolean {
+  return capabilitiesFor(role).includes(cap);
+}
+
+// Gestión de usuarios del comercio (requiere team:manage).
+export const inviteMemberSchema = z.object({
+  email: z.string().email('Email inválido'),
+  fullName: z.string().trim().max(120).optional(),
+  role: z.enum(['MANAGER', 'CASHIER', 'VIEWER']),
+  redirectTo: z.string().url().optional(),
+});
+export type InviteMemberInput = z.infer<typeof inviteMemberSchema>;
+
+export const updateMemberRoleSchema = z.object({
+  role: z.enum(['MANAGER', 'CASHIER', 'VIEWER']),
+});
+export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
+
 // Días de semana: 0=Domingo … 6=Sábado (igual que JS Date.getDay()).
 export const DAY_LABELS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
 

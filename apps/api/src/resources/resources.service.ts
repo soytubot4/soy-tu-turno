@@ -6,16 +6,11 @@ import type {
 } from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
 import { requireTenantContext } from '@/prisma/tenant-context';
+import { assertCan } from '@/auth/capabilities';
 
 type Tx = Parameters<Parameters<PrismaService['tenantSafe']>[0]>[0];
 
-/** Fase 1: escrituras solo OWNER/MANAGER. Después migramos a capabilities. */
-function assertCanWrite() {
-  const { role } = requireTenantContext();
-  if (role !== 'OWNER' && role !== 'MANAGER') {
-    throw new ForbiddenException('No tenés permiso para esta acción');
-  }
-}
+const assertCanWrite = () => assertCan('resources:write');
 
 @Injectable()
 export class ResourcesService {
@@ -102,7 +97,7 @@ export class ResourcesService {
   }
 
   setSchedule(resourceId: string, input: SetResourceScheduleInput) {
-    assertCanWrite();
+    assertCan('schedule:write');
     const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
       const found = await tx.resource.findFirst({ where: { id: resourceId }, select: { id: true } });

@@ -3,7 +3,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export type TenantContext = {
   tenantId: string;
   userId: string;
-  role: 'OWNER' | 'MANAGER' | 'CASHIER';
+  /** Rol del user en el comercio (OWNER/MANAGER/CASHIER/VIEWER/PENDING…). */
+  role: string;
   /** Email del user (snapshot). Opcional: tokens viejos quizás no lo traen. */
   email?: string;
 };

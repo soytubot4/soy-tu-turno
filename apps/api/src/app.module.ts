@@ -15,6 +15,8 @@ import { PortalModule } from './portal/portal.module';
 import { AdminModule } from './admin/admin.module';
 import { SettingsModule } from './settings/settings.module';
 import { PublicModule } from './public/public.module';
+import { MeModule } from './me/me.module';
+import { TeamModule } from './team/team.module';
 
 @Module({
   imports: [
@@ -31,6 +33,8 @@ import { PublicModule } from './public/public.module';
     AdminModule,
     SettingsModule,
     PublicModule,
+    MeModule,
+    TeamModule,
   ],
   providers: [
     // Auth global: valida el JWT de Supabase salvo endpoints @Public().

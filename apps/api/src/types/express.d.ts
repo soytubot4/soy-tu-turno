@@ -13,7 +13,7 @@ declare global {
         email: string | null;
         tenantId: string | null;
         tenantSlug: string | null;
-        role: 'OWNER' | 'MANAGER' | 'CASHIER' | null;
+        role: string | null;
       };
       adminUser?: {
         id: string;

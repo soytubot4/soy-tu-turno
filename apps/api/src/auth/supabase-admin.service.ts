@@ -63,6 +63,47 @@ export class SupabaseAdminService {
     return id;
   }
 
+  /** Invita a un miembro del equipo con un rol y setea su app_metadata. */
+  async inviteMember(params: {
+    email: string;
+    fullName?: string;
+    tenantId: string;
+    tenantSlug: string;
+    role: string;
+    redirectTo?: string;
+  }): Promise<string | null> {
+    if (!this.client) return null;
+    const appMetadata = {
+      tenant_id: params.tenantId,
+      tenant_slug: params.tenantSlug,
+      role: params.role,
+    };
+    const { data, error } = await this.client.auth.admin.inviteUserByEmail(params.email, {
+      data: { ...appMetadata, full_name: params.fullName ?? '' },
+      redirectTo: params.redirectTo,
+    });
+    if (error) throw new Error(`Supabase inviteUser: ${error.message}`);
+    const id = data.user?.id ?? null;
+    if (id) {
+      await this.client.auth.admin
+        .updateUserById(id, { app_metadata: appMetadata })
+        .catch((e) => this.logger.warn(`No pude setear app_metadata: ${(e as Error).message}`));
+    }
+    return id;
+  }
+
+  /** Cambia el role en app_metadata (para que el próximo JWT lo refleje). Best-effort. */
+  async setUserRole(userId: string, role: string): Promise<void> {
+    if (!this.client) return;
+    const { data } = await this.client.auth.admin
+      .getUserById(userId)
+      .catch(() => ({ data: null }) as { data: null });
+    const prev = (data?.user?.app_metadata ?? {}) as Record<string, unknown>;
+    await this.client.auth.admin
+      .updateUserById(userId, { app_metadata: { ...prev, role } })
+      .catch((e) => this.logger.warn(`No pude actualizar el role: ${(e as Error).message}`));
+  }
+
   /** Borra un user de Supabase Auth (best-effort, para rollback). */
   async deleteAuthUser(userId: string): Promise<void> {
     if (!this.client) return;

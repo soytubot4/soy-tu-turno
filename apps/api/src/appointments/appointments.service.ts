@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type {
   CreateAppointmentInput,
   UpdateAppointmentInput,
@@ -11,15 +6,11 @@ import type {
 } from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
 import { requireTenantContext } from '@/prisma/tenant-context';
+import { assertCan } from '@/auth/capabilities';
 
 type Tx = Parameters<Parameters<PrismaService['tenantSafe']>[0]>[0];
 
-function assertCanWrite() {
-  const { role } = requireTenantContext();
-  if (role !== 'OWNER' && role !== 'MANAGER') {
-    throw new ForbiddenException('No tenés permiso para esta acción');
-  }
-}
+const assertCanWrite = () => assertCan('appointments:write');
 
 /** ¿El error viene de la exclusion constraint anti-superposición? */
 function isOverlapConstraint(err: unknown): boolean {

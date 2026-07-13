@@ -47,7 +47,7 @@ export class JwtAuthGuard implements CanActivate {
         email: decoded.email ?? null,
         tenantId: decoded.app_metadata?.tenant_id ?? null,
         tenantSlug: decoded.app_metadata?.tenant_slug ?? null,
-        role: (decoded.app_metadata?.role as 'OWNER' | 'MANAGER' | 'CASHIER' | undefined) ?? null,
+        role: decoded.app_metadata?.role ?? null,
       };
       return true;
     } catch (err) {
