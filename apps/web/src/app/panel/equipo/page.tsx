@@ -11,6 +11,7 @@ import {
   deleteResource,
   type Resource,
 } from '@/features/equipo/api';
+import { useMe } from '@/features/me/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +19,8 @@ import { Label } from '@/components/ui/label';
 
 export default function EquipoPage() {
   const qc = useQueryClient();
+  const { can } = useMe();
+  const canWrite = can('resources:write');
   const { data: resources, isLoading } = useQuery({ queryKey: ['resources'], queryFn: listResources });
 
   const [name, setName] = useState('');
@@ -63,6 +66,7 @@ export default function EquipoPage() {
         </p>
       </div>
 
+      {canWrite && (
       <Card>
         <CardContent className="pt-5">
           <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
@@ -80,6 +84,7 @@ export default function EquipoPage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {isLoading ? (
         <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>
@@ -102,20 +107,22 @@ export default function EquipoPage() {
                 variant={r.active ? 'secondary' : 'outline'}
                 size="sm"
                 onClick={() => toggleActive.mutate(r)}
-                disabled={toggleActive.isPending}
+                disabled={toggleActive.isPending || !canWrite}
               >
                 {r.active ? 'Activo' : 'Inactivo'}
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
-                onClick={() => remove.mutate(r.id)}
-                disabled={remove.isPending}
-                title="Eliminar"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              {canWrite && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
+                  onClick={() => remove.mutate(r.id)}
+                  disabled={remove.isPending}
+                  title="Eliminar"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </li>
           ))}
         </ul>

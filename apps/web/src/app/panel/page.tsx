@@ -11,6 +11,7 @@ import {
   updateAppointment,
   type Appointment,
 } from '@/features/agenda/api';
+import { useMe } from '@/features/me/api';
 import { Button } from '@/components/ui/button';
 import { NewAppointmentDialog } from './new-appointment-dialog';
 
@@ -51,6 +52,8 @@ const STATUS: Record<AppointmentStatusValue, { label: string; className: string 
 
 export default function AgendaPage() {
   const qc = useQueryClient();
+  const { can } = useMe();
+  const canWrite = can('appointments:write');
   const [date, setDate] = useState(todayYmd());
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -83,9 +86,11 @@ export default function AgendaPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Agenda</h1>
-        <Button onClick={() => setDialogOpen(true)}>
-          <Plus className="h-4 w-4" /> Nuevo turno
-        </Button>
+        {canWrite && (
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4" /> Nuevo turno
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -115,6 +120,7 @@ export default function AgendaPage() {
             <AppointmentRow
               key={a.id}
               appt={a}
+              canWrite={canWrite}
               onCancel={() => cancel.mutate(a.id)}
               onComplete={() => setStatus.mutate({ id: a.id, status: 'COMPLETED' })}
               onNoShow={() => setStatus.mutate({ id: a.id, status: 'NO_SHOW' })}
@@ -141,12 +147,14 @@ function customerName(c: Appointment['customer']): string {
 
 function AppointmentRow({
   appt,
+  canWrite,
   onCancel,
   onComplete,
   onNoShow,
   busy,
 }: {
   appt: Appointment;
+  canWrite: boolean;
   onCancel: () => void;
   onComplete: () => void;
   onNoShow: () => void;
@@ -168,26 +176,28 @@ function AppointmentRow({
       <span className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium ${st.className}`}>
         {st.label}
       </span>
-      {appt.status !== 'COMPLETED' && (
+      {canWrite && appt.status !== 'COMPLETED' && (
         <Button variant="ghost" size="icon" title="Marcar atendido" onClick={onComplete} disabled={busy}>
           <Check className="h-4 w-4 text-[var(--color-success)]" />
         </Button>
       )}
-      {appt.status !== 'NO_SHOW' && (
+      {canWrite && appt.status !== 'NO_SHOW' && (
         <Button variant="ghost" size="sm" title="No se presentó" onClick={onNoShow} disabled={busy}>
           No vino
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="icon"
-        title="Cancelar turno"
-        onClick={onCancel}
-        disabled={busy}
-        className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
-      >
-        <X className="h-4 w-4" />
-      </Button>
+      {canWrite && (
+        <Button
+          variant="ghost"
+          size="icon"
+          title="Cancelar turno"
+          onClick={onCancel}
+          disabled={busy}
+          className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      )}
     </li>
   );
 }

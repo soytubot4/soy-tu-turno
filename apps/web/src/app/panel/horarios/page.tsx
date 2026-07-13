@@ -14,6 +14,7 @@ import {
   deleteBlock,
 } from '@/features/horarios/api';
 import { getTurnoSettings, updateTurnoSettings } from '@/features/horarios/settings-api';
+import { useMe } from '@/features/me/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +35,9 @@ function plusDaysYmd(days: number): string {
 
 export default function HorariosPage() {
   const qc = useQueryClient();
+  const { can } = useMe();
+  const canSchedule = can('schedule:write');
+  const canSettings = can('settings:write');
   const { data: resources } = useQuery({ queryKey: ['resources'], queryFn: listResources });
   const [resourceId, setResourceId] = useState<string>('');
 
@@ -51,9 +55,15 @@ export default function HorariosPage() {
         </p>
       </div>
 
-      <SlotStepCard />
+      {!canSchedule && !canSettings && (
+        <p className="rounded-[var(--radius)] border border-dashed border-[var(--color-border)] p-4 text-sm text-[var(--color-muted-foreground)]">
+          Con tu rol podés ver los horarios pero no editarlos.
+        </p>
+      )}
 
-      {(resources ?? []).length > 1 && (
+      {canSettings && <SlotStepCard />}
+
+      {canSchedule && (resources ?? []).length > 1 && (
         <div className="flex flex-wrap gap-2">
           {resources!.map((r) => (
             <Button
@@ -68,15 +78,16 @@ export default function HorariosPage() {
         </div>
       )}
 
-      {resourceId ? (
-        <WeeklyEditor key={resourceId} resourceId={resourceId} />
-      ) : (
-        <p className="text-sm text-[var(--color-muted-foreground)]">
-          Primero cargá a alguien en <span className="font-medium">Equipo</span>.
-        </p>
-      )}
+      {canSchedule &&
+        (resourceId ? (
+          <WeeklyEditor key={resourceId} resourceId={resourceId} />
+        ) : (
+          <p className="text-sm text-[var(--color-muted-foreground)]">
+            Primero cargá a alguien en <span className="font-medium">Equipo</span>.
+          </p>
+        ))}
 
-      <BlocksCard qc={qc} />
+      {canSchedule && <BlocksCard qc={qc} />}
     </div>
   );
 }

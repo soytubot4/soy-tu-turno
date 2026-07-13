@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, Clock } from 'lucide-react';
 import { listServices, createService, deleteService, updateService, type Service } from '@/features/servicios/api';
+import { useMe } from '@/features/me/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +13,8 @@ import { Label } from '@/components/ui/label';
 
 export default function ServiciosPage() {
   const qc = useQueryClient();
+  const { can } = useMe();
+  const canWrite = can('services:write');
   const { data: services, isLoading } = useQuery({ queryKey: ['services'], queryFn: listServices });
 
   const [name, setName] = useState('');
@@ -66,6 +69,7 @@ export default function ServiciosPage() {
         </p>
       </div>
 
+      {canWrite && (
       <Card>
         <CardContent className="pt-5">
           <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
@@ -103,6 +107,7 @@ export default function ServiciosPage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {isLoading ? (
         <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>
@@ -123,20 +128,22 @@ export default function ServiciosPage() {
                 variant={s.active ? 'secondary' : 'outline'}
                 size="sm"
                 onClick={() => toggleActive.mutate(s)}
-                disabled={toggleActive.isPending}
+                disabled={toggleActive.isPending || !canWrite}
               >
                 {s.active ? 'Activo' : 'Inactivo'}
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
-                onClick={() => remove.mutate(s.id)}
-                disabled={remove.isPending}
-                title="Eliminar"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              {canWrite && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
+                  onClick={() => remove.mutate(s.id)}
+                  disabled={remove.isPending}
+                  title="Eliminar"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </li>
           ))}
         </ul>
