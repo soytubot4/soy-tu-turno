@@ -188,6 +188,22 @@ export const adminCreateTenantSchema = z.object({
 });
 export type AdminCreateTenantInput = z.infer<typeof adminCreateTenantSchema>;
 
+/** Edición de datos de un comercio desde el superadmin. */
+export const adminUpdateTenantSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  slug: z
+    .string()
+    .trim()
+    .min(2)
+    .max(40)
+    .regex(/^[a-z0-9-]+$/, 'Solo minúsculas, números y guiones')
+    .optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  ownerName: z.string().trim().max(120).nullable().optional(),
+  timezone: z.string().trim().min(1).max(64).optional(),
+});
+export type AdminUpdateTenantInput = z.infer<typeof adminUpdateTenantSchema>;
+
 export const adminUpdateTurnoSchema = z.object({
   enabled: z.boolean(),
   timezone: z.string().trim().min(1).max(64).optional(),

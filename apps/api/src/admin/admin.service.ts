@@ -4,6 +4,7 @@ import {
   TURNO_FEATURE_KEY,
   type AdminUpdateTurnoInput,
   type AdminCreateTenantInput,
+  type AdminUpdateTenantInput,
 } from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
 import { SupabaseAdminService } from '@/auth/supabase-admin.service';
@@ -84,20 +85,102 @@ export class AdminService {
     return { tenant, ownerCreated, supabaseEnabled: this.supabase.enabled };
   }
 
+  /** Edita datos del comercio (nombre, subdominio, teléfono, dueño, zona horaria). */
+  async updateTenant(id: string, input: AdminUpdateTenantInput) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id },
+      select: { id: true, turnoConfig: true },
+    });
+    if (!tenant) throw new NotFoundException('Comercio no encontrado');
+
+    if (input.slug) {
+      const other = await this.prisma.tenant.findFirst({
+        where: { slug: input.slug, NOT: { id } },
+        select: { id: true },
+      });
+      if (other) throw new ConflictException(`El slug '${input.slug}' ya está en uso`);
+    }
+
+    const data: Prisma.TenantUpdateInput = {};
+    if (input.name !== undefined) data.name = input.name.trim();
+    if (input.slug !== undefined) data.slug = input.slug;
+    if (input.phone !== undefined) data.phone = input.phone?.trim() || null;
+    if (input.ownerName !== undefined) data.ownerName = input.ownerName?.trim() || null;
+    if (input.timezone !== undefined) {
+      const cfg = (tenant.turnoConfig && typeof tenant.turnoConfig === 'object'
+        ? tenant.turnoConfig
+        : {}) as Record<string, unknown>;
+      data.turnoConfig = { ...cfg, timezone: input.timezone.trim() } as Prisma.InputJsonValue;
+    }
+
+    return this.prisma.tenant.update({
+      where: { id },
+      data,
+      select: { id: true, slug: true, name: true },
+    });
+  }
+
+  /**
+   * Borra un comercio — SOLO si es exclusivo de soytuturno. Si también usa
+   * soytucanje/soyuadmin, borrarlo lo eliminaría de todo el ecosistema, así que
+   * se bloquea (sugerimos desactivar el turnero en su lugar).
+   */
+  async deleteTenant(id: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id },
+      select: { id: true, enabledProducts: true },
+    });
+    if (!tenant) throw new NotFoundException('Comercio no encontrado');
+
+    const others = tenant.enabledProducts.filter((p) => p !== TURNO_FEATURE_KEY);
+    if (others.length) {
+      throw new ConflictException(
+        `Este comercio también usa ${others.join(', ')}. Desde acá solo podés desactivar el turnero, no borrarlo.`,
+      );
+    }
+
+    // Guardamos los users para limpiar sus cuentas de Supabase Auth tras el borrado.
+    const users = await this.prisma.tenantSafe(
+      (tx) => tx.user.findMany({ select: { supabaseUserId: true } }),
+      id,
+    );
+    await this.prisma.tenant.delete({ where: { id } });
+    for (const u of users) {
+      await this.supabase.deleteAuthUser(u.supabaseUserId);
+    }
+    return { id };
+  }
+
   /** Todos los comercios del ecosistema, marcando cuáles tienen el turnero activo. */
   async listTenants() {
     const tenants = await this.prisma.tenant.findMany({
       where: { active: true },
       orderBy: { name: 'asc' },
-      select: { id: true, slug: true, name: true, enabledProducts: true, turnoConfig: true },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        phone: true,
+        ownerName: true,
+        enabledProducts: true,
+        turnoConfig: true,
+      },
     });
-    return tenants.map((t) => ({
-      id: t.id,
-      slug: t.slug,
-      name: t.name,
-      turnoEnabled: t.enabledProducts.includes(TURNO_FEATURE_KEY),
-      turnoConfig: t.turnoConfig,
-    }));
+    return tenants.map((t) => {
+      const otherProducts = t.enabledProducts.filter((p) => p !== TURNO_FEATURE_KEY);
+      return {
+        id: t.id,
+        slug: t.slug,
+        name: t.name,
+        phone: t.phone,
+        ownerName: t.ownerName,
+        turnoEnabled: t.enabledProducts.includes(TURNO_FEATURE_KEY),
+        turnoConfig: t.turnoConfig,
+        // Productos del ecosistema que también usa (si hay, no se puede borrar).
+        otherProducts,
+        deletable: otherProducts.length === 0,
+      };
+    });
   }
 
   /** Activa/desactiva el turnero para un comercio y actualiza su config. */

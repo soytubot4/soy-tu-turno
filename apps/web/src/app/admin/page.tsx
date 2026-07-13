@@ -3,20 +3,23 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { LogOut, Store, Plus } from 'lucide-react';
-import { listAdminTenants, updateTenantTurno, type AdminTenant } from '@/features/admin/api';
+import { LogOut, Store, Plus, Pencil, Trash2 } from 'lucide-react';
+import {
+  listAdminTenants,
+  updateTenantTurno,
+  deleteAdminTenant,
+  type AdminTenant,
+} from '@/features/admin/api';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { CreateTenantDialog } from './create-tenant-dialog';
-
-const DEFAULT_TZ = 'America/Asuncion';
+import { EditTenantDialog } from './edit-tenant-dialog';
 
 export default function AdminPage() {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<AdminTenant | null>(null);
   const { data: tenants, isLoading, isError, error } = useQuery({
     queryKey: ['admin', 'tenants'],
     queryFn: listAdminTenants,
@@ -63,19 +66,23 @@ export default function AdminPage() {
       ) : (
         <ul className="space-y-3">
           {tenants!.map((t) => (
-            <TenantRow key={t.id} tenant={t} />
+            <TenantRow key={t.id} tenant={t} onEdit={() => setEditing(t)} />
           ))}
         </ul>
       )}
+
+      <EditTenantDialog
+        tenant={editing}
+        open={!!editing}
+        onOpenChange={(v) => !v && setEditing(null)}
+      />
     </main>
   );
 }
 
-function TenantRow({ tenant }: { tenant: AdminTenant }) {
+function TenantRow({ tenant, onEdit }: { tenant: AdminTenant; onEdit: () => void }) {
   const qc = useQueryClient();
-  const initialTz =
-    typeof tenant.turnoConfig?.timezone === 'string' ? tenant.turnoConfig.timezone : DEFAULT_TZ;
-  const [timezone, setTimezone] = useState(initialTz);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'tenants'] });
 
@@ -88,10 +95,11 @@ function TenantRow({ tenant }: { tenant: AdminTenant }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const saveTz = useMutation({
-    mutationFn: () => updateTenantTurno(tenant.id, { enabled: tenant.turnoEnabled, timezone: timezone.trim() }),
+  const remove = useMutation({
+    mutationFn: () => deleteAdminTenant(tenant.id),
     onSuccess: () => {
-      toast.success('Zona horaria guardada');
+      toast.success('Comercio eliminado');
+      setConfirmingDelete(false);
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -109,6 +117,7 @@ function TenantRow({ tenant }: { tenant: AdminTenant }) {
             {tenant.slug}.soytuturno.com
           </p>
         </div>
+
         <Button
           variant={tenant.turnoEnabled ? 'secondary' : 'default'}
           size="sm"
@@ -117,27 +126,41 @@ function TenantRow({ tenant }: { tenant: AdminTenant }) {
         >
           {tenant.turnoEnabled ? 'Turnero activo' : 'Activar turnero'}
         </Button>
+
+        <Button variant="ghost" size="icon" title="Editar" onClick={onEdit}>
+          <Pencil className="h-4 w-4" />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          title={
+            tenant.deletable
+              ? 'Eliminar comercio'
+              : `También usa ${tenant.otherProducts.join(', ')} — desactivá el turnero en vez de borrar`
+          }
+          onClick={() => setConfirmingDelete(true)}
+          disabled={!tenant.deletable || remove.isPending}
+          className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10 disabled:text-[var(--color-muted-foreground)]"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
       </div>
 
-      {tenant.turnoEnabled && (
-        <div className="mt-3 flex items-end gap-2 border-t border-[var(--color-border)] pt-3">
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-xs">Zona horaria (IANA)</Label>
-            <Input
-              value={timezone}
-              onChange={(e) => setTimezone(e.target.value)}
-              className="w-56"
-              placeholder="America/Asuncion"
-            />
+      {confirmingDelete && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-border)] pt-3">
+          <span className="text-sm text-[var(--color-foreground)]">
+            ¿Eliminar <span className="font-medium">{tenant.name}</span> y todos sus turnos? No se
+            puede deshacer.
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setConfirmingDelete(false)} disabled={remove.isPending}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => remove.mutate()} disabled={remove.isPending}>
+              {remove.isPending ? 'Eliminando…' : 'Sí, eliminar'}
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => saveTz.mutate()}
-            disabled={saveTz.isPending || timezone.trim() === initialTz}
-          >
-            Guardar
-          </Button>
         </div>
       )}
     </li>
