@@ -39,12 +39,12 @@ export class PortalService {
         select: { name: true, logoUrl: true, address: true, phone: true, currency: true },
       });
       const services = await tx.service.findMany({
-        where: { active: true },
+        where: { active: true, tenantId },
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         select: { id: true, name: true, description: true, durationMin: true, price: true },
       });
       const resources = await tx.resource.findMany({
-        where: { active: true },
+        where: { active: true, tenantId },
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         select: { id: true, name: true, title: true, avatarUrl: true },
       });
@@ -57,7 +57,7 @@ export class PortalService {
     const byResource = new Map<string, number[]>();
     try {
       const all = await this.prisma.tenantSafe(
-        (tx) => tx.review.findMany({ select: { resourceId: true, rating: true } }),
+        (tx) => tx.review.findMany({ where: { tenantId }, select: { resourceId: true, rating: true } }),
         tenantId,
       );
       business = ratingOf(all.map((r) => r.rating));
@@ -85,7 +85,7 @@ export class PortalService {
     return this.prisma.tenantSafe(async (tx) => {
       if (input.resourceId) {
         const r = await tx.resource.findFirst({
-          where: { id: input.resourceId },
+          where: { id: input.resourceId, tenantId },
           select: { id: true },
         });
         if (!r) throw new BadRequestException('El profesional no existe');
@@ -135,7 +135,7 @@ export class PortalService {
     // 2) Alta del turno dentro de una transacción con RLS del tenant.
     return this.prisma.tenantSafe(async (tx) => {
       const service = await tx.service.findFirst({
-        where: { id: input.serviceId, active: true },
+        where: { id: input.serviceId, active: true, tenantId },
       });
       if (!service) throw new NotFoundException('Servicio no disponible');
 
@@ -147,6 +147,7 @@ export class PortalService {
       // Pre-chequeo de choque (la exclusion constraint es el backstop de carrera).
       const clash = await tx.appointment.findFirst({
         where: {
+          tenantId,
           resourceId: input.resourceId,
           status: { not: 'CANCELLED' },
           startAt: { lt: endAt },

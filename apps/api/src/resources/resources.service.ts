@@ -17,8 +17,10 @@ export class ResourcesService {
   constructor(private readonly prisma: PrismaService) {}
 
   list() {
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
       const rows = await tx.resource.findMany({
+        where: { tenantId: ctx.tenantId },
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         include: { services: { select: { serviceId: true } } },
       });
@@ -48,8 +50,9 @@ export class ResourcesService {
 
   update(id: string, input: UpdateResourceInput) {
     assertCanWrite();
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const found = await tx.resource.findFirst({ where: { id } });
+      const found = await tx.resource.findFirst({ where: { id, tenantId: ctx.tenantId } });
       if (!found) throw new NotFoundException('Recurso no encontrado');
       return tx.resource.update({
         where: { id },
@@ -69,11 +72,12 @@ export class ResourcesService {
 
   remove(id: string) {
     assertCanWrite();
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const found = await tx.resource.findFirst({ where: { id } });
+      const found = await tx.resource.findFirst({ where: { id, tenantId: ctx.tenantId } });
       if (!found) throw new NotFoundException('Recurso no encontrado');
       // Restrict en appointments: si tiene turnos, la FK lo frena. Damos mensaje claro.
-      const withTurnos = await tx.appointment.count({ where: { resourceId: id } });
+      const withTurnos = await tx.appointment.count({ where: { resourceId: id, tenantId: ctx.tenantId } });
       if (withTurnos > 0) {
         throw new ForbiddenException('El recurso tiene turnos; desactivalo en vez de borrarlo');
       }
@@ -84,11 +88,15 @@ export class ResourcesService {
 
   // ── Horario semanal ─────────────────────────────────────────
   getSchedule(resourceId: string) {
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const found = await tx.resource.findFirst({ where: { id: resourceId }, select: { id: true } });
+      const found = await tx.resource.findFirst({
+        where: { id: resourceId, tenantId: ctx.tenantId },
+        select: { id: true },
+      });
       if (!found) throw new NotFoundException('Recurso no encontrado');
       const days = await tx.resourceSchedule.findMany({
-        where: { resourceId },
+        where: { resourceId, tenantId: ctx.tenantId },
         orderBy: { dayOfWeek: 'asc' },
         select: { dayOfWeek: true, ranges: true },
       });
@@ -100,7 +108,10 @@ export class ResourcesService {
     assertCan('schedule:write');
     const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const found = await tx.resource.findFirst({ where: { id: resourceId }, select: { id: true } });
+      const found = await tx.resource.findFirst({
+        where: { id: resourceId, tenantId: ctx.tenantId },
+        select: { id: true },
+      });
       if (!found) throw new NotFoundException('Recurso no encontrado');
       // Reemplazo total: filtramos franjas vacías y upserteamos por día.
       for (const day of input.days) {

@@ -13,8 +13,10 @@ export class ServicesService {
   constructor(private readonly prisma: PrismaService) {}
 
   list() {
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
       const rows = await tx.service.findMany({
+        where: { tenantId: ctx.tenantId },
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         include: { resources: { select: { resourceId: true } } },
       });
@@ -49,7 +51,7 @@ export class ServicesService {
     assertCanWrite();
     const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const found = await tx.service.findFirst({ where: { id } });
+      const found = await tx.service.findFirst({ where: { id, tenantId: ctx.tenantId } });
       if (!found) throw new NotFoundException('Servicio no encontrado');
       const updated = await tx.service.update({
         where: { id },
@@ -73,8 +75,9 @@ export class ServicesService {
 
   remove(id: string) {
     assertCanWrite();
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const found = await tx.service.findFirst({ where: { id } });
+      const found = await tx.service.findFirst({ where: { id, tenantId: ctx.tenantId } });
       if (!found) throw new NotFoundException('Servicio no encontrado');
       await tx.service.delete({ where: { id } });
       return { id };
@@ -84,7 +87,7 @@ export class ServicesService {
   /** Reemplaza el set de recursos que ofrecen el servicio (solo recursos del tenant). */
   private async syncResources(tx: Tx, tenantId: string, serviceId: string, resourceIds: string[]) {
     const valid = await tx.resource.findMany({
-      where: { id: { in: resourceIds } },
+      where: { id: { in: resourceIds }, tenantId },
       select: { id: true },
     });
     const validIds = valid.map((r) => r.id);

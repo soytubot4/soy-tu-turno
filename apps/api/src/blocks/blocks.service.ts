@@ -12,9 +12,11 @@ export class BlocksService {
 
   /** Bloqueos en una ventana de fechas (inclusive). Opcional por recurso. */
   list(from: string, to: string, resourceId?: string) {
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
       return tx.scheduleBlock.findMany({
         where: {
+          tenantId: ctx.tenantId,
           date: { gte: new Date(from), lte: new Date(to) },
           ...(resourceId ? { resourceId } : {}),
         },
@@ -28,7 +30,10 @@ export class BlocksService {
     const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
       if (input.resourceId) {
-        const r = await tx.resource.findFirst({ where: { id: input.resourceId }, select: { id: true } });
+        const r = await tx.resource.findFirst({
+          where: { id: input.resourceId, tenantId: ctx.tenantId },
+          select: { id: true },
+        });
         if (!r) throw new NotFoundException('Recurso no encontrado');
       }
       if (!input.allDay && (!input.startAt || !input.endAt)) {
@@ -54,8 +59,12 @@ export class BlocksService {
 
   remove(id: string) {
     assertCanWrite();
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const found = await tx.scheduleBlock.findFirst({ where: { id }, select: { id: true } });
+      const found = await tx.scheduleBlock.findFirst({
+        where: { id, tenantId: ctx.tenantId },
+        select: { id: true },
+      });
       if (!found) throw new NotFoundException('Bloqueo no encontrado');
       await tx.scheduleBlock.delete({ where: { id } });
       return { id };

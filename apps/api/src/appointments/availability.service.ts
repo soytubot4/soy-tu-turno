@@ -34,6 +34,7 @@ export class AvailabilityService {
    */
   getSlots(query: AvailabilityQuery, tenantIdOverride?: string): Promise<Slot[]> {
     const tenantId = tenantIdOverride ?? getTenantContext()?.tenantId;
+    if (!tenantId) throw new Error('availability sin tenant context');
     return this.prisma.tenantSafe((tx) => this.computeSlots(tx, query, tenantId), tenantIdOverride);
   }
 
@@ -43,16 +44,16 @@ export class AvailabilityService {
     return slots.some((s) => s.startAt === startAtIso && s.resourceId === query.resourceId);
   }
 
-  private async computeSlots(tx: Tx, query: AvailabilityQuery, tenantId?: string): Promise<Slot[]> {
+  private async computeSlots(tx: Tx, query: AvailabilityQuery, tenantId: string): Promise<Slot[]> {
     const tenant = await tx.tenant.findFirst({
-      where: tenantId ? { id: tenantId } : undefined,
+      where: { id: tenantId },
       select: { turnoConfig: true },
     });
     const tz = tenantTimezone(tenant?.turnoConfig);
     const { slotStepMin, minLeadMinutes } = readTurnoConfig(tenant?.turnoConfig);
 
     const service = await tx.service.findFirst({
-      where: { id: query.serviceId },
+      where: { id: query.serviceId, tenantId },
       include: { resources: { select: { resourceId: true } } },
     });
     if (!service || !service.active) throw new NotFoundException('Servicio no disponible');
@@ -67,14 +68,17 @@ export class AvailabilityService {
     } else if (linkedIds.length) {
       resourceIds = linkedIds;
     } else {
-      const all = await tx.resource.findMany({ where: { active: true }, select: { id: true } });
+      const all = await tx.resource.findMany({
+        where: { active: true, tenantId },
+        select: { id: true },
+      });
       resourceIds = all.map((r) => r.id);
     }
     if (!resourceIds.length) return [];
 
     // Solo recursos activos.
     const activeResources = await tx.resource.findMany({
-      where: { id: { in: resourceIds }, active: true },
+      where: { id: { in: resourceIds }, active: true, tenantId },
       select: { id: true },
     });
     resourceIds = activeResources.map((r) => r.id);
@@ -83,7 +87,7 @@ export class AvailabilityService {
     const dow = dayOfWeekInTz(query.date, tz);
 
     const schedules = await tx.resourceSchedule.findMany({
-      where: { resourceId: { in: resourceIds }, dayOfWeek: dow },
+      where: { resourceId: { in: resourceIds }, dayOfWeek: dow, tenantId },
       select: { resourceId: true, ranges: true },
     });
     const rangesByResource = new Map<string, HourRange[]>();
@@ -97,6 +101,7 @@ export class AvailabilityService {
     // Bloqueos del día (por recurso o de todo el local).
     const blocks = await tx.scheduleBlock.findMany({
       where: {
+        tenantId,
         date: new Date(query.date),
         OR: [{ resourceId: null }, { resourceId: { in: resourceIds } }],
       },
@@ -106,6 +111,7 @@ export class AvailabilityService {
     // Turnos ya tomados ese día (no cancelados).
     const taken = await tx.appointment.findMany({
       where: {
+        tenantId,
         resourceId: { in: resourceIds },
         status: { not: 'CANCELLED' },
         startAt: { lt: new Date(dayEndUtc) },

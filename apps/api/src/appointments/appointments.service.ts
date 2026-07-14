@@ -24,9 +24,11 @@ export class AppointmentsService {
 
   /** Agenda dentro de [from, to). Incluye datos básicos para pintar el calendario. */
   list(query: ListAppointmentsQuery) {
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
       return tx.appointment.findMany({
         where: {
+          tenantId: ctx.tenantId,
           startAt: { gte: new Date(query.from), lt: new Date(query.to) },
           ...(query.resourceId ? { resourceId: query.resourceId } : {}),
           ...(query.status ? { status: query.status } : {}),
@@ -53,13 +55,13 @@ export class AppointmentsService {
     const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
       const service = await tx.service.findFirst({
-        where: { id: input.serviceId },
+        where: { id: input.serviceId, tenantId: ctx.tenantId },
         include: { resources: { select: { resourceId: true } } },
       });
       if (!service) throw new NotFoundException('Servicio no encontrado');
 
       const resource = await tx.resource.findFirst({
-        where: { id: input.resourceId },
+        where: { id: input.resourceId, tenantId: ctx.tenantId },
         select: { id: true },
       });
       if (!resource) throw new NotFoundException('Recurso no encontrado');
@@ -79,7 +81,7 @@ export class AppointmentsService {
       const startAt = new Date(input.startAt);
       const endAt = new Date(startAt.getTime() + service.durationMin * 60_000);
 
-      await this.assertNoOverlap(tx, input.resourceId, startAt, endAt);
+      await this.assertNoOverlap(tx, ctx.tenantId, input.resourceId, startAt, endAt);
 
       try {
         return await tx.appointment.create({
@@ -106,8 +108,9 @@ export class AppointmentsService {
 
   update(id: string, input: UpdateAppointmentInput) {
     assertCanWrite();
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const current = await tx.appointment.findFirst({ where: { id } });
+      const current = await tx.appointment.findFirst({ where: { id, tenantId: ctx.tenantId } });
       if (!current) throw new NotFoundException('Turno no encontrado');
 
       const resourceId = input.resourceId ?? current.resourceId;
@@ -118,7 +121,7 @@ export class AppointmentsService {
       let endAt = current.endAt;
       let priceAtBooking = current.priceAtBooking;
       if (input.serviceId || input.startAt) {
-        const service = await tx.service.findFirst({ where: { id: serviceId } });
+        const service = await tx.service.findFirst({ where: { id: serviceId, tenantId: ctx.tenantId } });
         if (!service) throw new NotFoundException('Servicio no encontrado');
         startAt = input.startAt ? new Date(input.startAt) : current.startAt;
         endAt = new Date(startAt.getTime() + service.durationMin * 60_000);
@@ -129,7 +132,7 @@ export class AppointmentsService {
       // Revalidar superposición solo si sigue activo y cambió horario/recurso.
       const movesTime = input.startAt || input.serviceId || input.resourceId;
       if (nextStatus !== 'CANCELLED' && movesTime) {
-        await this.assertNoOverlap(tx, resourceId, startAt, endAt, id);
+        await this.assertNoOverlap(tx, ctx.tenantId, resourceId, startAt, endAt, id);
       }
 
       try {
@@ -156,8 +159,12 @@ export class AppointmentsService {
   /** Cancela (soft): no borra, marca CANCELLED para conservar el historial. */
   cancel(id: string) {
     assertCanWrite();
+    const ctx = requireTenantContext();
     return this.prisma.tenantSafe(async (tx) => {
-      const found = await tx.appointment.findFirst({ where: { id }, select: { id: true } });
+      const found = await tx.appointment.findFirst({
+        where: { id, tenantId: ctx.tenantId },
+        select: { id: true },
+      });
       if (!found) throw new NotFoundException('Turno no encontrado');
       await tx.appointment.update({ where: { id }, data: { status: 'CANCELLED' } });
       return { id };
@@ -165,9 +172,17 @@ export class AppointmentsService {
   }
 
   /** Pre-chequeo de superposición (la exclusion constraint es el backstop de carrera). */
-  private async assertNoOverlap(tx: Tx, resourceId: string, startAt: Date, endAt: Date, excludeId?: string) {
+  private async assertNoOverlap(
+    tx: Tx,
+    tenantId: string,
+    resourceId: string,
+    startAt: Date,
+    endAt: Date,
+    excludeId?: string,
+  ) {
     const clash = await tx.appointment.findFirst({
       where: {
+        tenantId,
         resourceId,
         status: { not: 'CANCELLED' },
         startAt: { lt: endAt },
