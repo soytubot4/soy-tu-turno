@@ -10,8 +10,8 @@ WORKDIR /app
 # Habilitamos corepack y fijamos la versión de pnpm que usamos en el lockfile.
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
-# Workspace + lockfile primero (cache de instalación si no cambian deps).
-COPY pnpm-workspace.yaml pnpm-lock.yaml package.json .npmrc ./
+# Workspace + lockfile + tsconfig base (los packages lo extienden con ../../).
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json .npmrc tsconfig.base.json ./
 
 # Manifests de cada workspace (necesarios para que pnpm resuelva el grafo).
 COPY apps/api/package.json apps/api/
