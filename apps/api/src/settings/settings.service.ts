@@ -12,8 +12,21 @@ function readCfg(turnoConfig: unknown) {
   return {
     slotStepMin: typeof cfg.slotStepMin === 'number' && cfg.slotStepMin > 0 ? cfg.slotStepMin : 15,
     minLeadMinutes: typeof cfg.minLeadMinutes === 'number' && cfg.minLeadMinutes >= 0 ? cfg.minLeadMinutes : 0,
-    _raw: cfg,
+    askPlayers: cfg.askPlayers === true,
+    productsEnabled: cfg.productsEnabled === true,
+    priceSocioAbono: typeof cfg.priceSocioAbono === 'number' ? cfg.priceSocioAbono : null,
+    priceSocioSinAbono: typeof cfg.priceSocioSinAbono === 'number' ? cfg.priceSocioSinAbono : null,
+    priceNoSocio: typeof cfg.priceNoSocio === 'number' ? cfg.priceNoSocio : null,
+    priceWeekendEnabled: cfg.priceWeekendEnabled === true,
+    priceSocioAbonoWknd: typeof cfg.priceSocioAbonoWknd === 'number' ? cfg.priceSocioAbonoWknd : null,
+    priceSocioSinAbonoWknd: typeof cfg.priceSocioSinAbonoWknd === 'number' ? cfg.priceSocioSinAbonoWknd : null,
+    priceNoSocioWknd: typeof cfg.priceNoSocioWknd === 'number' ? cfg.priceNoSocioWknd : null,
   };
+}
+
+/** El JSON crudo de turnoConfig (para preservar claves desconocidas al guardar). */
+function rawCfg(turnoConfig: unknown): Record<string, unknown> {
+  return (turnoConfig && typeof turnoConfig === 'object' ? turnoConfig : {}) as Record<string, unknown>;
 }
 
 /** Config de turnos del comercio (guardada en tenants.turno_config). */
@@ -28,8 +41,7 @@ export class SettingsService {
         where: { id: ctx.tenantId },
         select: { turnoConfig: true },
       });
-      const { slotStepMin, minLeadMinutes } = readCfg(t?.turnoConfig);
-      return { slotStepMin, minLeadMinutes };
+      return readCfg(t?.turnoConfig);
     });
   }
 
@@ -41,17 +53,24 @@ export class SettingsService {
         where: { id: ctx.tenantId },
         select: { turnoConfig: true },
       });
-      const { _raw } = readCfg(t?.turnoConfig);
-      const next: Record<string, unknown> = { ..._raw };
+      const next: Record<string, unknown> = { ...rawCfg(t?.turnoConfig) };
       if (input.slotStepMin !== undefined) next.slotStepMin = input.slotStepMin;
       if (input.minLeadMinutes !== undefined) next.minLeadMinutes = input.minLeadMinutes;
+      if (input.askPlayers !== undefined) next.askPlayers = input.askPlayers;
+      if (input.productsEnabled !== undefined) next.productsEnabled = input.productsEnabled;
+      if (input.priceSocioAbono !== undefined) next.priceSocioAbono = input.priceSocioAbono;
+      if (input.priceSocioSinAbono !== undefined) next.priceSocioSinAbono = input.priceSocioSinAbono;
+      if (input.priceNoSocio !== undefined) next.priceNoSocio = input.priceNoSocio;
+      if (input.priceWeekendEnabled !== undefined) next.priceWeekendEnabled = input.priceWeekendEnabled;
+      if (input.priceSocioAbonoWknd !== undefined) next.priceSocioAbonoWknd = input.priceSocioAbonoWknd;
+      if (input.priceSocioSinAbonoWknd !== undefined) next.priceSocioSinAbonoWknd = input.priceSocioSinAbonoWknd;
+      if (input.priceNoSocioWknd !== undefined) next.priceNoSocioWknd = input.priceNoSocioWknd;
 
       await tx.tenant.update({
         where: { id: ctx.tenantId },
         data: { turnoConfig: next as Prisma.InputJsonValue },
       });
-      const saved = readCfg(next);
-      return { slotStepMin: saved.slotStepMin, minLeadMinutes: saved.minLeadMinutes };
+      return readCfg(next);
     });
   }
 }

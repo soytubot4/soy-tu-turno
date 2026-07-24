@@ -16,6 +16,11 @@ import { Button } from '@/components/ui/button';
 import { CreateTenantDialog } from './create-tenant-dialog';
 import { EditTenantDialog } from './edit-tenant-dialog';
 
+const OTHER_LABELS: Record<string, string> = {
+  soytucanje: 'canje',
+  soytuadmin: 'admin',
+};
+
 export default function AdminPage() {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
@@ -118,6 +123,18 @@ function TenantRow({ tenant, onEdit }: { tenant: AdminTenant; onEdit: () => void
           <p className="truncate text-xs text-[var(--color-muted-foreground)]">
             {tenant.slug}.soytuturno.com
           </p>
+          {tenant.otherProducts.length > 0 && (
+            <p className="mt-1 flex flex-wrap gap-1">
+              {tenant.otherProducts.map((p) => (
+                <span
+                  key={p}
+                  className="rounded bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-muted-foreground)]"
+                >
+                  {OTHER_LABELS[p] ?? p}
+                </span>
+              ))}
+            </p>
+          )}
         </div>
 
         <Button

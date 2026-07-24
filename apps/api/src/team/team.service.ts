@@ -6,7 +6,16 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { UserRole } from '@soytuturno/db';
-import type { InviteMemberInput, UpdateMemberRoleInput } from '@soytuturno/shared';
+import {
+  EDITABLE_ROLES,
+  effectiveCapabilities,
+  roleLabelFor,
+  type InviteMemberInput,
+  type RoleLabelsOverrides,
+  type RolePermissionsOverrides,
+  type UpdateMemberRoleInput,
+  type UpdateRolesConfigInput,
+} from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
 import { requireTenantContext } from '@/prisma/tenant-context';
 import { assertCan } from '@/auth/capabilities';
@@ -30,6 +39,61 @@ export class TeamService {
         select: { id: true, email: true, fullName: true, role: true, active: true },
       }),
     );
+  }
+
+  /** Config de roles del comercio: nombres + permisos efectivos por rol editable. */
+  async getRolesConfig() {
+    const ctx = requireTenantContext();
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: ctx.tenantId },
+      select: { turnoConfig: true },
+    });
+    const cfg = (tenant?.turnoConfig ?? {}) as Record<string, unknown>;
+    const canchas = cfg.canchas === true;
+    const labels = (cfg.roleLabels ?? undefined) as RoleLabelsOverrides | undefined;
+    const perms = (cfg.rolePermissions ?? undefined) as RolePermissionsOverrides | undefined;
+    return {
+      canchas,
+      roles: EDITABLE_ROLES.map((role) => ({
+        role,
+        label: roleLabelFor(role, labels, canchas),
+        capabilities: effectiveCapabilities(role, perms),
+      })),
+    };
+  }
+
+  /** Guarda nombres y permisos por rol (merge en turnoConfig). Solo team:manage. */
+  async saveRolesConfig(input: UpdateRolesConfigInput) {
+    assertCan('team:manage');
+    const ctx = requireTenantContext();
+    return this.prisma.tenantSafe(async (tx) => {
+      const tenant = await tx.tenant.findUnique({
+        where: { id: ctx.tenantId },
+        select: { turnoConfig: true },
+      });
+      const cfg = (tenant?.turnoConfig ?? {}) as Record<string, unknown>;
+
+      // Nombres: guardamos solo los no vacíos (vacío = usar el default del rubro).
+      const labels: RoleLabelsOverrides = {};
+      for (const role of EDITABLE_ROLES) {
+        const v = input.labels?.[role]?.trim();
+        if (v) labels[role] = v;
+      }
+      // Permisos: guardamos el set explícito por rol editable que venga en el payload.
+      const perms: RolePermissionsOverrides = {
+        ...((cfg.rolePermissions ?? {}) as RolePermissionsOverrides),
+      };
+      for (const role of EDITABLE_ROLES) {
+        const caps = input.permissions?.[role];
+        if (caps) perms[role] = caps;
+      }
+
+      await tx.tenant.update({
+        where: { id: ctx.tenantId },
+        data: { turnoConfig: { ...cfg, roleLabels: labels, rolePermissions: perms } },
+      });
+      return this.getRolesConfig();
+    }, ctx.tenantId);
   }
 
   async invite(input: InviteMemberInput) {

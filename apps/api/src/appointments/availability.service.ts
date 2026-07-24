@@ -69,16 +69,17 @@ export class AvailabilityService {
       resourceIds = linkedIds;
     } else {
       const all = await tx.resource.findMany({
-        where: { active: true, tenantId },
+        where: { active: true, tenantId, reference: false },
         select: { id: true },
       });
       resourceIds = all.map((r) => r.id);
     }
     if (!resourceIds.length) return [];
 
-    // Solo recursos activos.
+    // Solo recursos activos y que NO sean referencia del mapa (bar, entrada, o
+    // canchas marcadas como "referencia": se ven en el plano pero no se reservan).
     const activeResources = await tx.resource.findMany({
-      where: { id: { in: resourceIds }, active: true, tenantId },
+      where: { id: { in: resourceIds }, active: true, tenantId, reference: false },
       select: { id: true },
     });
     resourceIds = activeResources.map((r) => r.id);

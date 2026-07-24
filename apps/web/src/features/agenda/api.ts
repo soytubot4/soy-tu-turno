@@ -18,6 +18,12 @@ export type Appointment = {
   source: 'ADMIN' | 'WEB' | 'WHATSAPP';
   notes: string | null;
   priceAtBooking: string | null;
+  /** Jugadores/acompañantes cargados al reservar (si el comercio los pide). */
+  players:
+    | { firstName: string; lastName?: string; isSocio?: boolean; hasAbono?: boolean; price?: number | null }[]
+    | null;
+  /** Productos reservados junto al turno. */
+  products: { name: string; qty: number; price?: number | null }[] | null;
   customer: { id: string; firstName: string | null; lastName: string | null; phone: string | null };
   resource: { id: string; name: string; color: string | null };
   service: { id: string; name: string; durationMin: number; color: string | null };

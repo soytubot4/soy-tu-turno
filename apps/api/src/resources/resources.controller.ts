@@ -3,9 +3,11 @@ import {
   createResourceSchema,
   updateResourceSchema,
   setResourceScheduleSchema,
+  saveCourtLayoutSchema,
   type CreateResourceInput,
   type UpdateResourceInput,
   type SetResourceScheduleInput,
+  type SaveCourtLayoutInput,
 } from '@soytuturno/shared';
 import { ResourcesService } from './resources.service';
 import { ZodValidationPipe } from '@/common/pipes/zod-validation.pipe';
@@ -22,6 +24,12 @@ export class ResourcesController {
   @Post()
   async create(@Body(new ZodValidationPipe(createResourceSchema)) body: CreateResourceInput) {
     return { ok: true, data: await this.service.create(body) };
+  }
+
+  /** Guarda en lote las posiciones/rotaciones de las canchas en el mapa. */
+  @Post('layout')
+  async saveLayout(@Body(new ZodValidationPipe(saveCourtLayoutSchema)) body: SaveCourtLayoutInput) {
+    return { ok: true, data: await this.service.saveLayout(body) };
   }
 
   @Patch(':id')

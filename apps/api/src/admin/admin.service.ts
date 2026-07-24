@@ -42,6 +42,7 @@ export class AdminService {
           timezone: input.timezone?.trim() || DEFAULT_TIMEZONE,
           slotStepMin: 15,
           minLeadMinutes: 0,
+          canchas: input.canchas === true, // modo club deportivo
         },
         // soytuturno no usa el aprovisionamiento de dominios de soytucanje.
         staffDomainStatus: 'NOT_APPLICABLE',
@@ -205,6 +206,7 @@ export class AdminService {
     if (input.timezone !== undefined) nextCfg.timezone = input.timezone;
     if (input.slotStepMin !== undefined) nextCfg.slotStepMin = input.slotStepMin;
     if (input.minLeadMinutes !== undefined) nextCfg.minLeadMinutes = input.minLeadMinutes;
+    if (input.canchas !== undefined) nextCfg.canchas = input.canchas;
 
     const updated = await this.prisma.tenant.update({
       where: { id: tenantId },

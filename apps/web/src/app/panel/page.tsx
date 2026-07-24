@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChevronLeft, ChevronRight, Plus, X, Check, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, Check, Users, Phone, MapPin, Package } from 'lucide-react';
 import type { AppointmentStatusValue } from '@soytuturno/shared';
 import {
   listAppointments,
@@ -11,8 +11,16 @@ import {
   updateAppointment,
   type Appointment,
 } from '@/features/agenda/api';
+import { getTurnoSettings } from '@/features/horarios/settings-api';
 import { useMe } from '@/features/me/api';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { NewAppointmentDialog } from './new-appointment-dialog';
 
 function todayYmd(): string {
@@ -33,6 +41,15 @@ function dayBounds(ymd: string): { from: string; to: string } {
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 }
+/** Minutos desde medianoche (hora local) de un ISO. */
+function minutesOfIso(iso: string): number {
+  const d = new Date(iso);
+  return d.getHours() * 60 + d.getMinutes();
+}
+/** 'HH:MM' desde minutos desde medianoche. */
+function fmtMin(m: number): string {
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
 function fmtLongDate(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
   return new Date(y, m - 1, d).toLocaleDateString('es-AR', {
@@ -50,18 +67,38 @@ const STATUS: Record<AppointmentStatusValue, { label: string; className: string 
   NO_SHOW: { label: 'No vino', className: 'text-[var(--color-destructive)] border-[var(--color-destructive)]/40 bg-[var(--color-destructive)]/10' },
 };
 
+// Alto (px) de cada celda del intervalo. Un turno más largo que el intervalo
+// ocupa varias celdas (ej: con intervalo de 15 min, un turno de 30 min = 2 celdas).
+const CELL_PX = 44;
+
 export default function AgendaPage() {
   const qc = useQueryClient();
   const { can } = useMe();
   const canWrite = can('appointments:write');
   const [date, setDate] = useState(todayYmd());
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [newTime, setNewTime] = useState<string | null>(null); // hora precargada al tocar un slot
+  const [detail, setDetail] = useState<Appointment | null>(null);
+
+  const openNew = (time: string | null) => {
+    setNewTime(time);
+    setDialogOpen(true);
+  };
+
+  // Reloj para mover la línea de "ahora" (se actualiza cada minuto).
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const { from, to } = useMemo(() => dayBounds(date), [date]);
   const { data: appts, isLoading } = useQuery({
     queryKey: ['appointments', date],
     queryFn: () => listAppointments(from, to),
   });
+  const { data: settings } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const slotStepMin = settings?.slotStepMin ?? 15;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['appointments'] });
 
@@ -87,7 +124,7 @@ export default function AgendaPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Agenda</h1>
         {canWrite && (
-          <Button onClick={() => setDialogOpen(true)}>
+          <Button onClick={() => openNew(null)}>
             <Plus className="h-4 w-4" /> Nuevo turno
           </Button>
         )}
@@ -97,44 +134,62 @@ export default function AgendaPage() {
         <Button variant="outline" size="icon" onClick={() => setDate(shiftYmd(date, -1))}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
+        <div className="flex-1 text-center">
+          <div className="text-sm font-medium capitalize">{fmtLongDate(date)}</div>
+          {date !== todayYmd() && (
+            <button
+              type="button"
+              onClick={() => setDate(todayYmd())}
+              className="text-xs text-[var(--color-primary)] hover:underline"
+            >
+              Volver a hoy
+            </button>
+          )}
+        </div>
         <Button variant="outline" size="icon" onClick={() => setDate(shiftYmd(date, 1))}>
           <ChevronRight className="h-4 w-4" />
         </Button>
-        <div className="flex-1 text-sm font-medium capitalize">{fmtLongDate(date)}</div>
-        {date !== todayYmd() && (
-          <Button variant="ghost" size="sm" onClick={() => setDate(todayYmd())}>
-            Hoy
-          </Button>
-        )}
       </div>
 
       {isLoading ? (
         <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>
-      ) : list.length === 0 ? (
-        <p className="rounded-[var(--radius)] border border-dashed border-[var(--color-border)] p-8 text-center text-sm text-[var(--color-muted-foreground)]">
-          No hay turnos para este día.
-        </p>
       ) : (
-        <ul className="space-y-2">
-          {list.map((a) => (
-            <AppointmentRow
-              key={a.id}
-              appt={a}
-              canWrite={canWrite}
-              onCancel={() => cancel.mutate(a.id)}
-              onComplete={() => setStatus.mutate({ id: a.id, status: 'COMPLETED' })}
-              onNoShow={() => setStatus.mutate({ id: a.id, status: 'NO_SHOW' })}
-              busy={cancel.isPending || setStatus.isPending}
-            />
-          ))}
-        </ul>
+        <div className="space-y-2">
+          {canWrite && (
+            <p className="text-xs text-[var(--color-muted-foreground)]">
+              {list.length === 0
+                ? 'No hay turnos para este día. Tocá un horario para agregar uno.'
+                : 'Tocá un horario libre para agregar un turno.'}
+            </p>
+          )}
+          <DayGrid
+            date={date}
+            appts={list}
+            slotStepMin={slotStepMin}
+            nowMs={nowMs}
+            canWrite={canWrite}
+            onOpen={setDetail}
+            onSlotClick={(m) => openNew(fmtMin(m))}
+          />
+        </div>
       )}
 
       <NewAppointmentDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         defaultDate={date}
+        defaultTime={newTime ?? undefined}
         onCreated={invalidate}
+      />
+
+      <AppointmentDetailDialog
+        appt={detail}
+        canWrite={canWrite}
+        busy={cancel.isPending || setStatus.isPending}
+        onClose={() => setDetail(null)}
+        onCancel={(id) => cancel.mutate(id)}
+        onComplete={(id) => setStatus.mutate({ id, status: 'COMPLETED' })}
+        onNoShow={(id) => setStatus.mutate({ id, status: 'NO_SHOW' })}
       />
     </div>
   );
@@ -145,59 +200,395 @@ function customerName(c: Appointment['customer']): string {
   return name || c.phone || 'Cliente';
 }
 
-function AppointmentRow({
+// ── Grilla de día ──────────────────────────────────────────────
+type Placed = { a: Appointment; s: number; e: number; col: number; cols: number };
+
+/**
+ * Reparte los turnos en columnas para que los que se pisan en horario (ej: dos
+ * canchas a la misma hora) queden lado a lado en vez de encimados.
+ */
+function layoutAppts(appts: Appointment[]): Placed[] {
+  const evs = appts
+    .map((a) => ({ a, s: minutesOfIso(a.startAt), e: minutesOfIso(a.endAt) }))
+    .sort((x, y) => x.s - y.s || x.e - y.e);
+
+  const out: Placed[] = [];
+  let cluster: typeof evs = [];
+  let clusterEnd = -1;
+
+  const flush = () => {
+    const laneEnds: number[] = []; // por columna, el fin del último turno
+    const laneOf = new Map<(typeof evs)[number], number>();
+    for (const ev of cluster) {
+      let placed = -1;
+      for (let i = 0; i < laneEnds.length; i++) {
+        if (laneEnds[i]! <= ev.s) {
+          laneEnds[i] = ev.e;
+          placed = i;
+          break;
+        }
+      }
+      if (placed === -1) {
+        placed = laneEnds.length;
+        laneEnds.push(ev.e);
+      }
+      laneOf.set(ev, placed);
+    }
+    const cols = laneEnds.length || 1;
+    for (const ev of cluster) out.push({ ...ev, col: laneOf.get(ev) ?? 0, cols });
+    cluster = [];
+    clusterEnd = -1;
+  };
+
+  for (const ev of evs) {
+    if (cluster.length && ev.s >= clusterEnd) flush();
+    cluster.push(ev);
+    clusterEnd = Math.max(clusterEnd, ev.e);
+  }
+  if (cluster.length) flush();
+  return out;
+}
+
+function DayGrid({
+  date,
+  appts,
+  slotStepMin,
+  nowMs,
+  canWrite,
+  onOpen,
+  onSlotClick,
+}: {
+  date: string;
+  appts: Appointment[];
+  slotStepMin: number;
+  nowMs: number;
+  canWrite: boolean;
+  onOpen: (a: Appointment) => void;
+  onSlotClick: (minutes: number) => void;
+}) {
+  const step = Math.max(5, slotStepMin);
+  const pxPerMin = CELL_PX / step;
+
+  const now = new Date(nowMs);
+  const isToday = date === todayYmd();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  // Ventana visible: por defecto 08–20, expandida por los turnos del día (y por
+  // "ahora" si es hoy). Se redondea a la hora entera.
+  let winStart = 8 * 60;
+  let winEnd = 20 * 60;
+  for (const a of appts) {
+    winStart = Math.min(winStart, minutesOfIso(a.startAt));
+    winEnd = Math.max(winEnd, minutesOfIso(a.endAt));
+  }
+  if (isToday) {
+    winStart = Math.min(winStart, nowMin);
+    winEnd = Math.max(winEnd, nowMin + 30);
+  }
+  winStart = Math.max(0, Math.floor(winStart / 60) * 60);
+  winEnd = Math.min(24 * 60, Math.ceil(winEnd / 60) * 60);
+  if (winEnd <= winStart) winEnd = winStart + 60;
+
+  const cells: number[] = [];
+  for (let m = winStart; m < winEnd; m += step) cells.push(m);
+  const gridH = (winEnd - winStart) * pxPerMin;
+  const placed = layoutAppts(appts);
+
+  return (
+    <div
+      className="overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] [scrollbar-gutter:stable]"
+      style={{ maxHeight: 'calc(100vh - 230px)' }}
+    >
+      {/* py-3: aire arriba/abajo para que la primera y última etiqueta no se corten */}
+      <div className="flex py-3">
+        {/* Columna de horas (incluye la hora de cierre al final) */}
+        <div className="w-14 shrink-0 border-r border-[var(--color-border)]">
+          {cells.map((m) => (
+            <div key={m} style={{ height: CELL_PX }} className="relative">
+              <span className="absolute -top-1.5 right-1.5 text-[11px] tabular-nums text-[var(--color-muted-foreground)]">
+                {fmtMin(m)}
+              </span>
+            </div>
+          ))}
+          {/* Hora de cierre (borde inferior de la última celda) */}
+          <div className="relative">
+            <span className="absolute -top-1.5 right-1.5 text-[11px] tabular-nums text-[var(--color-muted-foreground)]">
+              {fmtMin(winEnd)}
+            </span>
+          </div>
+        </div>
+
+        {/* Área de turnos */}
+        <div className="relative flex-1" style={{ height: gridH }}>
+          {/* Celdas del intervalo: cada una es una "fila" clickeable para agregar
+              un turno a esa hora. El hover la resalta y muestra el "+ turno". */}
+          {cells.map((m, i) => (
+            <button
+              key={m}
+              type="button"
+              disabled={!canWrite}
+              onClick={() => onSlotClick(m)}
+              style={{ top: i * CELL_PX, height: CELL_PX }}
+              className={`group absolute inset-x-0 flex items-center gap-1.5 border-t px-2 text-left transition-colors ${
+                m % 60 === 0 ? 'border-[var(--color-border)]' : 'border-[var(--color-border)]/40'
+              } ${canWrite ? 'cursor-pointer hover:bg-[var(--color-accent)]/50' : 'cursor-default'}`}
+            >
+              {canWrite && (
+                <span className="pointer-events-none flex items-center gap-1 text-xs font-medium text-[var(--color-primary)] opacity-0 transition-opacity group-hover:opacity-100">
+                  <Plus className="h-3.5 w-3.5" /> Agregar turno a las {fmtMin(m)}
+                </span>
+              )}
+            </button>
+          ))}
+
+          {/* Línea de cierre (borde inferior de la grilla) */}
+          <div className="absolute inset-x-0 border-t border-[var(--color-border)]" style={{ top: gridH }} />
+
+          {/* Línea de "ahora" */}
+          {isToday && nowMin >= winStart && nowMin <= winEnd && (
+            <div
+              className="pointer-events-none absolute inset-x-0 z-20 flex items-center"
+              style={{ top: (nowMin - winStart) * pxPerMin }}
+            >
+              <div className="-ml-1 h-2 w-2 rounded-full bg-[var(--color-destructive)]" />
+              <div className="h-px flex-1 bg-[var(--color-destructive)]" />
+            </div>
+          )}
+
+          {/* Bloques de turnos (los bloques van encima de las celdas clickeables) */}
+          {placed.map(({ a, s, e, col, cols }) => (
+            <AppointmentBlock
+              key={a.id}
+              appt={a}
+              top={(s - winStart) * pxPerMin}
+              height={Math.max(20, (e - s) * pxPerMin)}
+              leftPct={(col / cols) * 100}
+              widthPct={(1 / cols) * 100}
+              onOpen={() => onOpen(a)}
+            />
+          ))}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AppointmentBlock({
+  appt,
+  top,
+  height,
+  leftPct,
+  widthPct,
+  onOpen,
+}: {
+  appt: Appointment;
+  top: number;
+  height: number;
+  leftPct: number;
+  widthPct: number;
+  onOpen: () => void;
+}) {
+  const st = STATUS[appt.status];
+  const accent = appt.resource.color || appt.service.color || null;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`${fmtTime(appt.startAt)}–${fmtTime(appt.endAt)} · ${customerName(appt.customer)}`}
+      className={`absolute z-10 flex flex-col overflow-hidden rounded-md border px-2 py-1 text-left leading-tight transition-shadow hover:shadow-md ${st.className}`}
+      style={{
+        top,
+        height,
+        left: `calc(${leftPct}% + 2px)`,
+        width: `calc(${widthPct}% - 4px)`,
+        borderLeft: accent ? `3px solid ${accent}` : undefined,
+      }}
+    >
+      <span className="truncate text-xs font-semibold">
+        {fmtTime(appt.startAt)} · {customerName(appt.customer)}
+      </span>
+      {height > 30 && (
+        <span className="truncate text-[11px] opacity-80">
+          {appt.resource.name}
+          {appt.service?.name ? ` · ${appt.service.name}` : ''}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <span className="shrink-0 text-[var(--color-muted-foreground)]">{label}</span>
+      <span className="text-right font-medium capitalize">{value}</span>
+    </div>
+  );
+}
+
+/** Detalle de una reserva (se abre al tocar el turno en la agenda). */
+function AppointmentDetailDialog({
   appt,
   canWrite,
+  busy,
+  onClose,
   onCancel,
   onComplete,
   onNoShow,
-  busy,
 }: {
-  appt: Appointment;
+  appt: Appointment | null;
   canWrite: boolean;
-  onCancel: () => void;
-  onComplete: () => void;
-  onNoShow: () => void;
   busy: boolean;
+  onClose: () => void;
+  onCancel: (id: string) => void;
+  onComplete: (id: string) => void;
+  onNoShow: (id: string) => void;
 }) {
-  const st = STATUS[appt.status];
   return (
-    <li className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] p-3">
-      <div className="flex w-20 shrink-0 flex-col text-sm">
-        <span className="font-semibold">{fmtTime(appt.startAt)}</span>
-        <span className="text-xs text-[var(--color-muted-foreground)]">{fmtTime(appt.endAt)}</span>
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{customerName(appt.customer)}</p>
-        <p className="flex items-center gap-1.5 truncate text-xs text-[var(--color-muted-foreground)]">
-          <Clock className="h-3 w-3" /> {appt.service.name} · {appt.resource.name}
-        </p>
-      </div>
-      <span className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium ${st.className}`}>
-        {st.label}
-      </span>
-      {canWrite && appt.status !== 'COMPLETED' && (
-        <Button variant="ghost" size="icon" title="Marcar atendido" onClick={onComplete} disabled={busy}>
-          <Check className="h-4 w-4 text-[var(--color-success)]" />
-        </Button>
-      )}
-      {canWrite && appt.status !== 'NO_SHOW' && (
-        <Button variant="ghost" size="sm" title="No se presentó" onClick={onNoShow} disabled={busy}>
-          No vino
-        </Button>
-      )}
-      {canWrite && (
-        <Button
-          variant="ghost"
-          size="icon"
-          title="Cancelar turno"
-          onClick={onCancel}
-          disabled={busy}
-          className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      )}
-    </li>
+    <Dialog open={!!appt} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        {appt && (
+          <>
+            <DialogHeader>
+              <DialogTitle>{customerName(appt.customer)}</DialogTitle>
+              <DialogDescription>Detalle de la reserva</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[var(--color-muted-foreground)]">Estado</span>
+                <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATUS[appt.status].className}`}>
+                  {STATUS[appt.status].label}
+                </span>
+              </div>
+              <DetailRow
+                label="Cuándo"
+                value={`${new Date(appt.startAt).toLocaleDateString('es-AR', {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                })} · ${fmtTime(appt.startAt)}–${fmtTime(appt.endAt)}`}
+              />
+              <DetailRow label="Servicio" value={appt.service.name} />
+              <div className="flex items-start justify-between gap-3">
+                <span className="shrink-0 text-[var(--color-muted-foreground)]">Cancha</span>
+                <span className="flex items-center gap-1.5 text-right font-medium">
+                  <MapPin className="h-3.5 w-3.5 text-[var(--color-primary)]" /> {appt.resource.name}
+                </span>
+              </div>
+              {appt.customer.phone && (
+                <div className="flex items-start justify-between gap-3">
+                  <span className="shrink-0 text-[var(--color-muted-foreground)]">Teléfono</span>
+                  <span className="flex items-center gap-1.5 text-right font-medium">
+                    <Phone className="h-3.5 w-3.5" /> {appt.customer.phone}
+                  </span>
+                </div>
+              )}
+
+              {appt.players && appt.players.length > 0 && (
+                <div>
+                  <p className="mb-1 flex items-center gap-1.5 text-[var(--color-muted-foreground)]">
+                    <Users className="h-3.5 w-3.5" /> Jugadores
+                  </p>
+                  <ul className="space-y-1.5 rounded-[var(--radius)] border border-[var(--color-border)] p-2.5">
+                    {appt.players.map((p, i) => (
+                      <li key={i} className="flex items-center justify-between gap-2">
+                        <span>{[p.firstName, p.lastName].filter(Boolean).join(' ')}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-xs text-[var(--color-muted-foreground)]">
+                            {p.isSocio ? (p.hasAbono ? 'socio c/abono' : 'socio') : 'no socio'}
+                          </span>
+                          {p.price != null && (
+                            <span className="font-medium tabular-nums">${p.price.toLocaleString('es-AR')}</span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {appt.products && appt.products.length > 0 && (
+                <div>
+                  <p className="mb-1 flex items-center gap-1.5 text-[var(--color-muted-foreground)]">
+                    <Package className="h-3.5 w-3.5" /> Productos reservados
+                  </p>
+                  <ul className="space-y-1.5 rounded-[var(--radius)] border border-[var(--color-border)] p-2.5">
+                    {appt.products.map((p, i) => (
+                      <li key={i} className="flex items-center justify-between gap-2">
+                        <span>
+                          {p.qty}× {p.name}
+                        </span>
+                        {p.price != null && (
+                          <span className="font-medium tabular-nums">
+                            ${(p.price * p.qty).toLocaleString('es-AR')}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {appt.priceAtBooking != null && (
+                <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-2 text-base font-semibold">
+                  <span>Total</span>
+                  <span className="tabular-nums">${Number(appt.priceAtBooking).toLocaleString('es-AR')}</span>
+                </div>
+              )}
+
+              {appt.notes && (
+                <div>
+                  <p className="text-[var(--color-muted-foreground)]">Notas</p>
+                  <p>{appt.notes}</p>
+                </div>
+              )}
+
+              {canWrite && appt.status !== 'CANCELLED' && (
+                <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-3">
+                  {appt.status !== 'COMPLETED' && (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        onComplete(appt.id);
+                        onClose();
+                      }}
+                      disabled={busy}
+                    >
+                      <Check className="h-4 w-4" /> Atendido
+                    </Button>
+                  )}
+                  {appt.status !== 'NO_SHOW' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        onNoShow(appt.id);
+                        onClose();
+                      }}
+                      disabled={busy}
+                    >
+                      No vino
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="ml-auto text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
+                    onClick={() => {
+                      onCancel(appt.id);
+                      onClose();
+                    }}
+                    disabled={busy}
+                  >
+                    <X className="h-4 w-4" /> Cancelar
+                  </Button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

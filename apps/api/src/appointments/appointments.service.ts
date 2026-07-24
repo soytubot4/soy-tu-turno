@@ -1,12 +1,15 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type {
-  CreateAppointmentInput,
-  UpdateAppointmentInput,
-  ListAppointmentsQuery,
+import {
+  playerPrice,
+  isWeekendDate,
+  type CreateAppointmentInput,
+  type UpdateAppointmentInput,
+  type ListAppointmentsQuery,
 } from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
 import { requireTenantContext } from '@/prisma/tenant-context';
 import { assertCan } from '@/auth/capabilities';
+import { ProductsService } from '@/products/products.service';
 
 type Tx = Parameters<Parameters<PrismaService['tenantSafe']>[0]>[0];
 
@@ -20,7 +23,10 @@ function isOverlapConstraint(err: unknown): boolean {
 
 @Injectable()
 export class AppointmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly products: ProductsService,
+  ) {}
 
   /** Agenda dentro de [from, to). Incluye datos básicos para pintar el calendario. */
   list(query: ListAppointmentsQuery) {
@@ -42,6 +48,8 @@ export class AppointmentsService {
           source: true,
           notes: true,
           priceAtBooking: true,
+          players: true,
+          products: true,
           customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
           resource: { select: { id: true, name: true, color: true } },
           service: { select: { id: true, name: true, durationMin: true, color: true } },
@@ -83,6 +91,54 @@ export class AppointmentsService {
 
       await this.assertNoOverlap(tx, ctx.tenantId, input.resourceId, startAt, endAt);
 
+      // Jugadores + precio por jugador (según config del tenant, con finde si aplica).
+      const tenant = await tx.tenant.findUnique({
+        where: { id: ctx.tenantId },
+        select: { turnoConfig: true },
+      });
+      const cfg = (tenant?.turnoConfig ?? {}) as Record<string, unknown>;
+      const num = (v: unknown) => (typeof v === 'number' ? v : null);
+      const tz = typeof cfg.timezone === 'string' ? cfg.timezone : 'America/Argentina/Buenos_Aires';
+      const localDate = new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(startAt);
+      const weekend = cfg.priceWeekendEnabled === true && isWeekendDate(localDate);
+      const pricing = weekend
+        ? {
+            socioAbono: num(cfg.priceSocioAbonoWknd),
+            socioSinAbono: num(cfg.priceSocioSinAbonoWknd),
+            noSocio: num(cfg.priceNoSocioWknd),
+          }
+        : {
+            socioAbono: num(cfg.priceSocioAbono),
+            socioSinAbono: num(cfg.priceSocioSinAbono),
+            noSocio: num(cfg.priceNoSocio),
+          };
+      const players = (input.players ?? [])
+        .filter((p) => p.firstName?.trim())
+        .map((p) => {
+          const isSocio = !!p.isSocio;
+          const hasAbono = isSocio && !!p.hasAbono;
+          return {
+            firstName: p.firstName.trim(),
+            lastName: (p.lastName ?? '').trim(),
+            isSocio,
+            hasAbono,
+            price: playerPrice(isSocio, hasAbono, pricing),
+          };
+        });
+      const playersTotal = players.reduce((sum, p) => sum + (p.price ?? 0), 0);
+      const hasAnyPrice = players.some((p) => p.price != null);
+
+      // Reserva de productos (descuenta stock dentro de la misma tx).
+      const reserved = await this.products.reserve(tx, ctx.tenantId, input.products ?? []);
+      const productsTotal = reserved.reduce((s, p) => s + (p.price ?? 0) * p.qty, 0);
+      const baseTotal = hasAnyPrice ? playersTotal : service.price != null ? Number(service.price) : 0;
+      const anyPrice = hasAnyPrice || service.price != null || productsTotal > 0;
+
       try {
         return await tx.appointment.create({
           data: {
@@ -94,8 +150,10 @@ export class AppointmentsService {
             endAt,
             status: 'CONFIRMED',
             source: 'ADMIN',
-            priceAtBooking: service.price ?? null,
+            priceAtBooking: anyPrice ? baseTotal + productsTotal : null,
             notes: input.notes?.trim() || null,
+            players: players.length ? players : undefined,
+            products: reserved.length ? reserved : undefined,
           },
           select: { id: true },
         });
@@ -163,9 +221,13 @@ export class AppointmentsService {
     return this.prisma.tenantSafe(async (tx) => {
       const found = await tx.appointment.findFirst({
         where: { id, tenantId: ctx.tenantId },
-        select: { id: true },
+        select: { id: true, status: true, products: true },
       });
       if (!found) throw new NotFoundException('Turno no encontrado');
+      // Devolver el stock de los productos reservados (si no estaba ya cancelado).
+      if (found.status !== 'CANCELLED') {
+        await this.products.restore(tx, ctx.tenantId, found.products);
+      }
       await tx.appointment.update({ where: { id }, data: { status: 'CANCELLED' } });
       return { id };
     });

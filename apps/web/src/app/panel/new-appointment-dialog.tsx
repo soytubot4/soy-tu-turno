@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { Plus, X } from 'lucide-react';
+import { playerPrice, isWeekendDate } from '@soytuturno/shared';
 import { listServices } from '@/features/servicios/api';
 import { listResources } from '@/features/equipo/api';
+import { getTurnoSettings } from '@/features/horarios/settings-api';
 import {
   getAvailability,
   searchCustomers,
@@ -31,16 +34,30 @@ const selectCls =
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 }
+/** Minutos desde medianoche (hora local) de un ISO. */
+function minutesOfIso(iso: string): number {
+  const d = new Date(iso);
+  return d.getHours() * 60 + d.getMinutes();
+}
+/** 'HH:MM' → minutos desde medianoche. */
+function hhmmToMin(hhmm: string): number | null {
+  const [h, m] = hhmm.split(':').map(Number);
+  if (h == null || m == null || Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
 
 export function NewAppointmentDialog({
   open,
   onOpenChange,
   defaultDate,
+  defaultTime,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   defaultDate: string;
+  /** Hora 'HH:MM' precargada (al tocar un slot en la agenda). */
+  defaultTime?: string;
   onCreated: () => void;
 }) {
   const { data: services } = useQuery({ queryKey: ['services'], queryFn: listServices, enabled: open });
@@ -51,6 +68,28 @@ export function NewAppointmentDialog({
   const [date, setDate] = useState(defaultDate);
   const [slot, setSlot] = useState<{ startAt: string; resourceId: string } | null>(null);
   const [customer, setCustomer] = useState<CustomerLite | null>(null);
+  const [players, setPlayers] = useState<
+    { firstName: string; lastName: string; isSocio: boolean; hasAbono: boolean }[]
+  >([
+    { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+    { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+  ]);
+
+  const { data: settings } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings, enabled: open });
+  const askPlayers = !!settings?.askPlayers;
+  const isWeekend = !!settings?.priceWeekendEnabled && isWeekendDate(date);
+  const pricing = {
+    socioAbono: (isWeekend ? settings?.priceSocioAbonoWknd : settings?.priceSocioAbono) ?? null,
+    socioSinAbono: (isWeekend ? settings?.priceSocioSinAbonoWknd : settings?.priceSocioSinAbono) ?? null,
+    noSocio: (isWeekend ? settings?.priceNoSocioWknd : settings?.priceNoSocio) ?? null,
+  };
+  const hasPricing = pricing.socioAbono != null || pricing.socioSinAbono != null || pricing.noSocio != null;
+  const validPlayers = players.filter((p) => p.firstName.trim()).length;
+  const playersTotal = players
+    .filter((p) => p.firstName.trim())
+    .reduce((sum, p) => sum + (playerPrice(p.isSocio, p.hasAbono, pricing) ?? 0), 0);
+  const setPlayer = (i: number, patch: Partial<(typeof players)[number]>) =>
+    setPlayers((ps) => ps.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
 
   // Reset al abrir.
   useEffect(() => {
@@ -60,6 +99,10 @@ export function NewAppointmentDialog({
       setDate(defaultDate);
       setSlot(null);
       setCustomer(null);
+      setPlayers([
+        { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+        { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+      ]);
     }
   }, [open, defaultDate]);
 
@@ -70,6 +113,22 @@ export function NewAppointmentDialog({
 
   const activeServices = (services ?? []).filter((s) => s.active);
   const activeResources = (resources ?? []).filter((r) => r.active);
+
+  // Si hay una sola opción, la elegimos sola (una vez, al abrir): no tiene sentido
+  // que el usuario seleccione a mano lo único que hay. Un ref evita re-forzarlo
+  // después (ej: que el "Cualquiera" del profesional no se pueda volver a poner).
+  const autoPicked = useRef(false);
+  useEffect(() => {
+    if (open) autoPicked.current = false;
+  }, [open]);
+  useEffect(() => {
+    if (!open || autoPicked.current || !services || !resources) return;
+    const s0 = activeServices[0];
+    const r0 = activeResources[0];
+    if (activeServices.length === 1 && s0) setServiceId(s0.id);
+    if (activeResources.length === 1 && r0) setResourceId(r0.id);
+    autoPicked.current = true;
+  }, [open, services, resources, activeServices, activeResources]);
   const resourceName = useMemo(() => {
     const map = new Map(activeResources.map((r) => [r.id, r.name]));
     return (id: string) => map.get(id) ?? '';
@@ -81,6 +140,18 @@ export function NewAppointmentDialog({
     enabled: open && !!serviceId && !!date,
   });
 
+  // Si se abrió tocando un slot de la agenda (defaultTime), auto-elegimos el
+  // horario que coincide una vez que cargan los disponibles del servicio.
+  useEffect(() => {
+    if (!open || !defaultTime || slot) return;
+    const target = hhmmToMin(defaultTime);
+    if (target == null) return;
+    const match = (slots ?? []).find(
+      (s) => minutesOfIso(s.startAt) === target && (!resourceId || s.resourceId === resourceId),
+    );
+    if (match) setSlot({ startAt: match.startAt, resourceId: match.resourceId });
+  }, [open, defaultTime, slots, slot, resourceId]);
+
   const create = useMutation({
     mutationFn: () =>
       createAppointment({
@@ -88,6 +159,16 @@ export function NewAppointmentDialog({
         resourceId: slot!.resourceId,
         serviceId,
         startAt: slot!.startAt,
+        players: askPlayers
+          ? players
+              .filter((p) => p.firstName.trim())
+              .map((p) => ({
+                firstName: p.firstName.trim(),
+                lastName: p.lastName.trim(),
+                isSocio: p.isSocio,
+                hasAbono: p.isSocio && p.hasAbono,
+              }))
+          : undefined,
       }),
     onSuccess: () => {
       toast.success('Turno agendado');
@@ -97,14 +178,19 @@ export function NewAppointmentDialog({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const canSubmit = !!serviceId && !!slot && !!customer && !create.isPending;
+  const canSubmit =
+    !!serviceId && !!slot && !!customer && !create.isPending && (!askPlayers || validPlayers >= 2);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Nuevo turno</DialogTitle>
-          <DialogDescription>Elegí servicio, horario y cliente.</DialogDescription>
+          <DialogDescription>
+            {defaultTime
+              ? `Elegí servicio y cliente para las ${defaultTime}.`
+              : 'Elegí servicio, horario y cliente.'}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -172,6 +258,88 @@ export function NewAppointmentDialog({
           )}
 
           <CustomerPicker value={customer} onChange={setCustomer} />
+
+          {askPlayers && (
+            <div className="space-y-2">
+              <Label>Jugadores (mínimo 2)</Label>
+              {players.map((p, i) => (
+                <div key={i} className="space-y-2 rounded-[var(--radius)] border border-[var(--color-border)] p-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-4 shrink-0 text-xs text-[var(--color-muted-foreground)]">{i + 1}.</span>
+                    <Input
+                      value={p.firstName}
+                      onChange={(e) => setPlayer(i, { firstName: e.target.value })}
+                      placeholder="Nombre"
+                      className="flex-1"
+                    />
+                    <Input
+                      value={p.lastName}
+                      onChange={(e) => setPlayer(i, { lastName: e.target.value })}
+                      placeholder="Apellido"
+                      className="flex-1"
+                    />
+                    {players.length > 2 && (
+                      <button
+                        type="button"
+                        onClick={() => setPlayers((ps) => ps.filter((_, idx) => idx !== i))}
+                        className="shrink-0 text-[var(--color-muted-foreground)] hover:text-[var(--color-destructive)]"
+                        title="Quitar"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="ml-6 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                    <label className="flex cursor-pointer items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={p.isSocio}
+                        onChange={(e) => setPlayer(i, { isSocio: e.target.checked, hasAbono: e.target.checked && p.hasAbono })}
+                        className="h-4 w-4 accent-[var(--color-primary)]"
+                      />
+                      Socio
+                    </label>
+                    {p.isSocio && (
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={p.hasAbono}
+                          onChange={(e) => setPlayer(i, { hasAbono: e.target.checked })}
+                          className="h-4 w-4 accent-[var(--color-primary)]"
+                        />
+                        Abono de tenis
+                      </label>
+                    )}
+                    {hasPricing && p.firstName.trim() && (
+                      <span className="ml-auto text-sm font-medium">
+                        {(() => {
+                          const pr = playerPrice(p.isSocio, p.hasAbono, pricing);
+                          return pr != null ? `$${pr.toLocaleString('es-AR')}` : '—';
+                        })()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {players.length < 12 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => setPlayers((ps) => [...ps, { firstName: '', lastName: '', isSocio: false, hasAbono: false }])}
+                >
+                  <Plus className="h-4 w-4" /> Agregar jugador
+                </Button>
+              )}
+              {hasPricing && validPlayers > 0 && (
+                <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-2 text-sm font-semibold">
+                  <span>Total a pagar</span>
+                  <span>${playersTotal.toLocaleString('es-AR')}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <DialogFooter>

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { updateAdminTenant, type AdminTenant } from '@/features/admin/api';
+import { updateAdminTenant, updateTenantTurno, type AdminTenant } from '@/features/admin/api';
 import {
   Dialog,
   DialogContent,
@@ -43,6 +43,7 @@ export function EditTenantDialog({
   const [phone, setPhone] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [timezone, setTimezone] = useState(DEFAULT_TZ);
+  const [canchas, setCanchas] = useState(false);
 
   // Al abrir con un tenant, precargar sus valores actuales.
   useEffect(() => {
@@ -54,11 +55,13 @@ export function EditTenantDialog({
       const tz =
         typeof tenant.turnoConfig?.timezone === 'string' ? tenant.turnoConfig.timezone : DEFAULT_TZ;
       setTimezone(tz);
+      setCanchas(tenant.turnoConfig?.canchas === true);
     }
   }, [open, tenant]);
 
   const initialTz =
     typeof tenant?.turnoConfig?.timezone === 'string' ? tenant.turnoConfig.timezone : DEFAULT_TZ;
+  const initialCanchas = tenant?.turnoConfig?.canchas === true;
 
   const dirty =
     !!tenant &&
@@ -66,17 +69,22 @@ export function EditTenantDialog({
       slug !== tenant.slug ||
       phone.trim() !== (tenant.phone ?? '') ||
       ownerName.trim() !== (tenant.ownerName ?? '') ||
-      timezone.trim() !== initialTz);
+      timezone.trim() !== initialTz ||
+      canchas !== initialCanchas);
 
   const save = useMutation({
-    mutationFn: () =>
-      updateAdminTenant(tenant!.id, {
+    mutationFn: async () => {
+      await updateAdminTenant(tenant!.id, {
         name: name.trim(),
         slug,
         phone: phone.trim() || null,
         ownerName: ownerName.trim() || null,
         timezone: timezone.trim() || undefined,
-      }),
+      });
+      if (canchas !== initialCanchas) {
+        await updateTenantTurno(tenant!.id, { enabled: tenant!.turnoEnabled, canchas });
+      }
+    },
     onSuccess: () => {
       toast.success('Comercio actualizado');
       qc.invalidateQueries({ queryKey: ['admin', 'tenants'] });
@@ -131,6 +139,21 @@ export function EditTenantDialog({
             <Label>Zona horaria (IANA)</Label>
             <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} />
           </div>
+
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-[var(--radius)] border border-[var(--color-border)] p-3">
+            <input
+              type="checkbox"
+              checked={canchas}
+              onChange={(e) => setCanchas(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[var(--color-primary)]"
+            />
+            <span className="text-sm">
+              <span className="font-medium">Club deportivo (canchas)</span>
+              <span className="block text-xs text-[var(--color-muted-foreground)]">
+                Habilita las canchas (pádel, tenis, fútbol…) con deporte, superficie y el mapa del predio.
+              </span>
+            </span>
+          </label>
         </div>
 
         <DialogFooter>

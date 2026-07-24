@@ -207,6 +207,7 @@ model Service {
   description String?
   durationMin Int      @map("duration_min")
   price       Decimal? @db.Decimal(14, 2)
+  priceUnit   String?  @map("price_unit") // 'court' (por cancha) | 'player' (por jugador) | null
   color       String? // color del chip en el calendario
   active      Boolean  @default(true)
   sortOrder   Int      @default(0) @map("sort_order")
@@ -227,10 +228,24 @@ model Resource {
   tenantId  String   @map("tenant_id") @db.Uuid
   name      String
   title     String? // ej: "Barbero", "Estilista" (subtítulo en la ficha del equipo)
+  phone     String? // teléfono de contacto del profesional (opcional)
   avatarUrl String?  @map("avatar_url")
   color     String?
   active    Boolean  @default(true)
   sortOrder Int      @default(0) @map("sort_order")
+
+  // Modo "canchas" (clubes deportivos): deporte + superficie + ubicación en el
+  // mapa del predio (coordenadas en el sistema virtual del canvas del editor).
+  sport       String? // padel | tenis | futbol | futsal | basquet | otro
+  surface     String? // ej: "Polvo de ladrillo", "Césped sintético", "Cemento"
+  // true = solo referencia del mapa (bar, entrada, o cancha que no se alquila):
+  // se ve en el plano pero NO aparece en Canchas ni se reserva.
+  reference   Boolean @default(false)
+  mapX        Float?  @map("map_x")
+  mapY        Float?  @map("map_y")
+  mapW        Float?  @map("map_w")
+  mapH        Float?  @map("map_h")
+  mapRotation Float?  @map("map_rotation")
   // Opcional: vincular a un usuario del sistema (ej. el peluquero que se loguea).
   userId    String?  @map("user_id") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at")
@@ -313,6 +328,10 @@ model Appointment {
   // Precio congelado al momento de reservar (el del servicio puede cambiar después).
   priceAtBooking Decimal?      @map("price_at_booking") @db.Decimal(14, 2)
   notes      String?
+  // Jugadores/acompañantes del turno: [{ firstName, lastName, isSocio }]
+  players    Json?
+  // Productos reservados junto al turno: [{ productId, name, qty, price }]
+  products   Json?
   createdAt  DateTime          @default(now()) @map("created_at")
   updatedAt  DateTime          @updatedAt @map("updated_at")
 

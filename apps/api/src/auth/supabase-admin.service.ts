@@ -104,6 +104,20 @@ export class SupabaseAdminService {
       .catch((e) => this.logger.warn(`No pude actualizar el role: ${(e as Error).message}`));
   }
 
+  /**
+   * Firma una subida al bucket compartido `tenant-assets` (escritura directa
+   * bloqueada por policy; se sube con este token). Devuelve el token + la URL
+   * pública final. El cliente hace uploadToSignedUrl(path, token, file).
+   */
+  async signUpload(path: string): Promise<{ path: string; token: string; publicUrl: string } | null> {
+    if (!this.client) return null;
+    const bucket = 'tenant-assets';
+    const { data, error } = await this.client.storage.from(bucket).createSignedUploadUrl(path);
+    if (error) throw new Error(`Supabase signUpload: ${error.message}`);
+    const { data: pub } = this.client.storage.from(bucket).getPublicUrl(data.path);
+    return { path: data.path, token: data.token, publicUrl: pub.publicUrl };
+  }
+
   /** Borra un user de Supabase Auth (best-effort, para rollback). */
   async deleteAuthUser(userId: string): Promise<void> {
     if (!this.client) return;

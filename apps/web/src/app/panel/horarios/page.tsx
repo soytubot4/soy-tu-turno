@@ -18,6 +18,7 @@ import { useMe } from '@/features/me/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PriceField } from '@/components/ui/price-input';
 import { Label } from '@/components/ui/label';
 
 // Orden de visualización: Lunes → Domingo.
@@ -35,7 +36,7 @@ function plusDaysYmd(days: number): string {
 
 export default function HorariosPage() {
   const qc = useQueryClient();
-  const { can } = useMe();
+  const { can, canchas } = useMe();
   const canSchedule = can('schedule:write');
   const canSettings = can('settings:write');
   const { data: resources } = useQuery({ queryKey: ['resources'], queryFn: listResources });
@@ -49,9 +50,11 @@ export default function HorariosPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Horarios</h1>
+        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Configuración</h1>
         <p className="text-sm text-[var(--color-muted-foreground)]">
-          Horario de atención semanal de cada integrante y los días que el local no abre.
+          {canchas
+            ? 'Turnos, datos y precios por jugador, horario de atención de cada cancha y los días que el club no abre.'
+            : 'Intervalo de turnos, horario de atención de cada integrante y los días que el local no abre.'}
         </p>
       </div>
 
@@ -62,6 +65,12 @@ export default function HorariosPage() {
       )}
 
       {canSettings && <SlotStepCard />}
+
+      {canSettings && <ProductsToggleCard />}
+
+      {canSettings && canchas && <PlayersToggleCard />}
+
+      {canSettings && canchas && <PlayerPricingCard />}
 
       {canSchedule && (resources ?? []).length > 1 && (
         <div className="flex flex-wrap gap-2">
@@ -80,7 +89,11 @@ export default function HorariosPage() {
 
       {canSchedule &&
         (resourceId ? (
-          <WeeklyEditor key={resourceId} resourceId={resourceId} />
+          <WeeklyEditor
+            key={resourceId}
+            resourceId={resourceId}
+            courts={canchas ? (resources ?? []).map((r) => ({ id: r.id, name: r.name })) : []}
+          />
         ) : (
           <p className="text-sm text-[var(--color-muted-foreground)]">
             Primero cargá a alguien en <span className="font-medium">Equipo</span>.
@@ -149,7 +162,220 @@ function SlotStepCard() {
   );
 }
 
-function WeeklyEditor({ resourceId }: { resourceId: string }) {
+/** Prende/apaga la sección Productos + la reserva de productos en el portal. */
+function ProductsToggleCard() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const save = useMutation({
+    mutationFn: (v: boolean) => updateTurnoSettings({ productsEnabled: v }),
+    onSuccess: () => {
+      toast.success('Guardado');
+      qc.invalidateQueries({ queryKey: ['turno-settings'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const on = data?.productsEnabled ?? false;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Productos</CardTitle>
+        <CardDescription>
+          Si lo prendés, aparece la sección <span className="font-medium">Productos</span> para cargar lo que
+          ofrecés, y el cliente puede reservarlos junto con el turno (se le separan del stock).
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>
+        ) : (
+          <label className="flex cursor-pointer items-center gap-3">
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={(e) => save.mutate(e.target.checked)}
+              disabled={save.isPending}
+              className="h-4 w-4 accent-[var(--color-primary)]"
+            />
+            <span className="text-sm">Ofrecer productos para reservar con el turno</span>
+          </label>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Prende/apaga que el cliente cargue los datos de los jugadores al reservar. */
+function PlayersToggleCard() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const save = useMutation({
+    mutationFn: (v: boolean) => updateTurnoSettings({ askPlayers: v }),
+    onSuccess: () => {
+      toast.success('Guardado');
+      qc.invalidateQueries({ queryKey: ['turno-settings'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const on = data?.askPlayers ?? false;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Datos de los jugadores</CardTitle>
+        <CardDescription>
+          Si lo prendés, al reservar el cliente carga los jugadores/acompañantes (nombre, apellido y si
+          son socios). Se piden mínimo 2.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>
+        ) : (
+          <label className="flex cursor-pointer items-center gap-3">
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={(e) => save.mutate(e.target.checked)}
+              disabled={save.isPending}
+              className="h-4 w-4 accent-[var(--color-primary)]"
+            />
+            <span className="text-sm">Pedir datos de los jugadores al reservar</span>
+          </label>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Precios por jugador según su condición (socio + abono), con opción de precio de finde. */
+function PlayerPricingCard() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const [a, setA] = useState('');
+  const [b, setB] = useState('');
+  const [c, setC] = useState('');
+  const [wknd, setWknd] = useState(false);
+  const [aw, setAw] = useState('');
+  const [bw, setBw] = useState('');
+  const [cw, setCw] = useState('');
+
+  const asStr = (n: number | null) => (n != null ? String(n) : '');
+  useEffect(() => {
+    if (data) {
+      setA(asStr(data.priceSocioAbono));
+      setB(asStr(data.priceSocioSinAbono));
+      setC(asStr(data.priceNoSocio));
+      setWknd(data.priceWeekendEnabled);
+      setAw(asStr(data.priceSocioAbonoWknd));
+      setBw(asStr(data.priceSocioSinAbonoWknd));
+      setCw(asStr(data.priceNoSocioWknd));
+    }
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      updateTurnoSettings({
+        priceSocioAbono: a.trim() ? Number(a) : null,
+        priceSocioSinAbono: b.trim() ? Number(b) : null,
+        priceNoSocio: c.trim() ? Number(c) : null,
+        priceWeekendEnabled: wknd,
+        priceSocioAbonoWknd: aw.trim() ? Number(aw) : null,
+        priceSocioSinAbonoWknd: bw.trim() ? Number(bw) : null,
+        priceNoSocioWknd: cw.trim() ? Number(cw) : null,
+      }),
+    onSuccess: () => {
+      toast.success('Precios guardados');
+      qc.invalidateQueries({ queryKey: ['turno-settings'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!data?.askPlayers) return null;
+
+  const norm = (s: string) => (s.trim() ? String(Number(s)) : '');
+  const dirty =
+    norm(a) !== asStr(data.priceSocioAbono) ||
+    norm(b) !== asStr(data.priceSocioSinAbono) ||
+    norm(c) !== asStr(data.priceNoSocio) ||
+    wknd !== data.priceWeekendEnabled ||
+    norm(aw) !== asStr(data.priceSocioAbonoWknd) ||
+    norm(bw) !== asStr(data.priceSocioSinAbonoWknd) ||
+    norm(cw) !== asStr(data.priceNoSocioWknd);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Precios por jugador</CardTitle>
+        <CardDescription>
+          Cuánto paga cada jugador según su condición. Se calcula solo en la reserva y se le muestra al
+          cliente. Dejá vacío el que no uses.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={wknd}
+            onChange={(e) => setWknd(e.target.checked)}
+            className="h-4 w-4 accent-[var(--color-primary)]"
+          />
+          El precio cambia los fines de semana (sábado y domingo)
+        </label>
+        {wknd && (
+          <div className="flex items-center gap-3 text-xs text-[var(--color-muted-foreground)]">
+            <div className="flex-1" />
+            <div className="w-32 text-center">Entre semana</div>
+            <div className="w-32 text-center">Fin de semana</div>
+          </div>
+        )}
+        <PriceRow label="Socio con abono de tenis" value={a} onChange={setA} value2={wknd ? aw : undefined} onChange2={setAw} />
+        <PriceRow label="Socio sin abono de tenis" value={b} onChange={setB} value2={wknd ? bw : undefined} onChange2={setBw} />
+        <PriceRow label="No socio" value={c} onChange={setC} value2={wknd ? cw : undefined} onChange2={setCw} />
+        <div className="flex justify-end">
+          <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
+            {save.isPending ? 'Guardando…' : 'Guardar'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PriceCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="relative w-32">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--color-muted-foreground)]">
+        $
+      </span>
+      <PriceField value={value} onChange={onChange} className="pl-7" placeholder="—" />
+    </div>
+  );
+}
+
+function PriceRow({
+  label,
+  value,
+  onChange,
+  value2,
+  onChange2,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  value2?: string;
+  onChange2?: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <Label className="flex-1 text-sm font-normal">{label}</Label>
+      <PriceCell value={value} onChange={onChange} />
+      {value2 !== undefined && onChange2 && <PriceCell value={value2} onChange={onChange2} />}
+    </div>
+  );
+}
+
+function WeeklyEditor({ resourceId, courts }: { resourceId: string; courts: { id: string; name: string }[] }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['schedule', resourceId],
@@ -157,6 +383,16 @@ function WeeklyEditor({ resourceId }: { resourceId: string }) {
   });
 
   const [days, setDays] = useState<Record<number, HourRange[]>>({});
+  // Canchas seleccionadas para aplicar este mismo horario (default: todas).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  useEffect(() => setSelected(new Set(courts.map((c) => c.id))), [courts]);
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
 
   useEffect(() => {
     if (!data) return;
@@ -177,6 +413,25 @@ function WeeklyEditor({ resourceId }: { resourceId: string }) {
     onSuccess: () => {
       toast.success('Horario guardado');
       qc.invalidateQueries({ queryKey: ['schedule', resourceId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Aplica el horario que se ve en pantalla a varias canchas de una.
+  const applyMany = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const payload = {
+        days: DAY_ORDER.map((dayOfWeek) => ({
+          dayOfWeek,
+          ranges: (days[dayOfWeek] ?? []).filter((r) => r.from && r.to && r.from < r.to),
+        })),
+      };
+      for (const id of ids) await setSchedule(id, payload);
+      return ids;
+    },
+    onSuccess: (ids) => {
+      toast.success(`Horario aplicado a ${ids.length} cancha${ids.length === 1 ? '' : 's'}`);
+      ids.forEach((id) => qc.invalidateQueries({ queryKey: ['schedule', id] }));
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -250,6 +505,50 @@ function WeeklyEditor({ resourceId }: { resourceId: string }) {
             </div>
           );
         })}
+        {courts.length > 1 && (
+          <div className="space-y-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-accent)]/30 p-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium">Aplicar este horario a varias canchas</p>
+              <button
+                type="button"
+                className="text-xs text-[var(--color-primary)] hover:underline"
+                onClick={() => setSelected(new Set(selected.size === courts.length ? [] : courts.map((c) => c.id)))}
+              >
+                {selected.size === courts.length ? 'Ninguna' : 'Todas'}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {courts.map((c) => (
+                <label
+                  key={c.id}
+                  className="flex cursor-pointer items-center gap-1.5 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-1 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(c.id)}
+                    onChange={() => toggle(c.id)}
+                    className="h-3.5 w-3.5 accent-[var(--color-primary)]"
+                  />
+                  {c.name}
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-[var(--color-muted-foreground)]">
+                Guarda el horario de arriba en las canchas tildadas (incluida esta).
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={applyMany.isPending || selected.size === 0}
+                onClick={() => applyMany.mutate([...selected])}
+              >
+                {applyMany.isPending ? 'Aplicando…' : `Aplicar a ${selected.size}`}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end pt-2">
           <Button onClick={() => save.mutate()} disabled={save.isPending}>
             {save.isPending ? 'Guardando…' : 'Guardar horario'}

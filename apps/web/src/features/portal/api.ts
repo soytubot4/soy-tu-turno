@@ -2,11 +2,29 @@
 
 import { apiFetch } from '@/lib/api';
 import { currentTenantSlug } from '@/lib/current-tenant';
-import type { PortalBookInput, PortalReviewInput } from '@soytuturno/shared';
+import type { PortalBookInput, PortalReviewInput, Sport, PriceUnit } from '@soytuturno/shared';
 
 const slug = () => currentTenantSlug();
 
 export type Rating = { avg: number | null; count: number };
+
+export type PortalResource = {
+  id: string;
+  name: string;
+  title: string | null;
+  avatarUrl: string | null;
+  rating: Rating;
+  // Modo canchas:
+  sport: Sport | null;
+  surface: string | null;
+  color: string | null;
+  reference: boolean;
+  mapX: number | null;
+  mapY: number | null;
+  mapW: number | null;
+  mapH: number | null;
+  mapRotation: number | null;
+};
 
 export type PortalInfo = {
   tenant: {
@@ -16,6 +34,16 @@ export type PortalInfo = {
     phone: string | null;
     currency: string;
   } | null;
+  /** Modo club deportivo: mostrar el mapa de canchas. */
+  canchas: boolean;
+  /** Pedir datos de los jugadores/acompañantes al reservar. */
+  askPlayers: boolean;
+  /** Precios por jugador según condición (socio + abono), con set de finde opcional. */
+  playerPricing: {
+    weekendEnabled: boolean;
+    weekday: { socioAbono: number | null; socioSinAbono: number | null; noSocio: number | null };
+    weekend: { socioAbono: number | null; socioSinAbono: number | null; noSocio: number | null };
+  };
   rating: Rating;
   services: {
     id: string;
@@ -23,14 +51,17 @@ export type PortalInfo = {
     description: string | null;
     durationMin: number;
     price: string | null;
+    priceUnit: PriceUnit | null;
   }[];
-  resources: {
-    id: string;
+  /** Productos (variantes) que se pueden reservar junto al turno. */
+  products: {
+    variantId: string;
     name: string;
-    title: string | null;
-    avatarUrl: string | null;
-    rating: Rating;
+    price: number | null;
+    available: number;
+    imageUrl: string | null;
   }[];
+  resources: PortalResource[];
 };
 
 export const getPortalInfo = () => apiFetch<PortalInfo>('/portal/info', { tenantSlug: slug() });

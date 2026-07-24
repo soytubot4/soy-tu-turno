@@ -42,6 +42,7 @@ export function CreateTenantDialog({
   const [ownerEmail, setOwnerEmail] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [timezone, setTimezone] = useState('America/Argentina/Buenos_Aires');
+  const [canchas, setCanchas] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -51,6 +52,7 @@ export function CreateTenantDialog({
       setOwnerEmail('');
       setOwnerName('');
       setTimezone('America/Argentina/Buenos_Aires');
+      setCanchas(false);
     }
   }, [open]);
 
@@ -65,6 +67,7 @@ export function CreateTenantDialog({
         ownerEmail: ownerEmail.trim(),
         ownerName: ownerName.trim() || undefined,
         timezone: timezone.trim() || undefined,
+        canchas,
         redirectTo: tenantAdminUrl(finalSlug, '/set-password'),
       }),
     onSuccess: (r) => {
@@ -140,6 +143,21 @@ export function CreateTenantDialog({
             <Label>Zona horaria (IANA)</Label>
             <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} />
           </div>
+
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-[var(--radius)] border border-[var(--color-border)] p-3">
+            <input
+              type="checkbox"
+              checked={canchas}
+              onChange={(e) => setCanchas(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[var(--color-primary)]"
+            />
+            <span className="text-sm">
+              <span className="font-medium">Club deportivo (canchas)</span>
+              <span className="block text-xs text-[var(--color-muted-foreground)]">
+                Habilita las canchas (pádel, tenis, fútbol…) con deporte, superficie y el mapa del predio.
+              </span>
+            </span>
+          </label>
         </div>
 
         <DialogFooter>

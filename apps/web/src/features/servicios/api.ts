@@ -2,7 +2,7 @@
 
 import { apiFetch } from '@/lib/api';
 import { currentTenantSlug } from '@/lib/current-tenant';
-import type { CreateServiceInput, UpdateServiceInput } from '@soytuturno/shared';
+import type { CreateServiceInput, UpdateServiceInput, PriceUnit } from '@soytuturno/shared';
 
 const slug = () => currentTenantSlug();
 
@@ -12,6 +12,7 @@ export type Service = {
   description: string | null;
   durationMin: number;
   price: string | null;
+  priceUnit: PriceUnit | null;
   color: string | null;
   active: boolean;
   sortOrder: number;

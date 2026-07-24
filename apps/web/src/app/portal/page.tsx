@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CalendarCheck, Clock, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { CalendarCheck, Clock, ChevronLeft, ChevronRight, CheckCircle2, MapPin, Plus, X } from 'lucide-react';
+import { SPORT_LABELS, PRICE_UNIT_LABELS, playerPrice, isWeekendDate, type Sport } from '@soytuturno/shared';
 import {
   getPortalInfo,
   getPortalAvailability,
@@ -12,6 +13,7 @@ import {
   type PortalInfo,
   type Rating,
 } from '@/features/portal/api';
+import { CourtMap } from '@/components/court-map';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -48,11 +50,49 @@ export default function PortalPage() {
   const [date, setDate] = useState(todayYmd());
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [slot, setSlot] = useState<{ startAt: string; resourceId: string } | null>(null);
+  const [court, setCourt] = useState<string | null>(null); // cancha elegida (modo club)
   const [firstName, setFirstName] = useState('');
   const [phone, setPhone] = useState('');
+  const [players, setPlayers] = useState<
+    { firstName: string; lastName: string; isSocio: boolean; hasAbono: boolean }[]
+  >([
+    { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+    { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+  ]);
   const [done, setDone] = useState<{ startAt: string; resourceId: string; resourceName: string } | null>(null);
 
-  useEffect(() => setSlot(null), [service, date]);
+  const canchas = !!info?.canchas;
+  const askPlayers = !!info?.askPlayers;
+  const pp = info?.playerPricing;
+  const isWeekend = !!pp?.weekendEnabled && isWeekendDate(date);
+  const pricing = (isWeekend ? pp?.weekend : pp?.weekday) ?? { socioAbono: null, socioSinAbono: null, noSocio: null };
+  const hasPricing = pricing.socioAbono != null || pricing.socioSinAbono != null || pricing.noSocio != null;
+  const validPlayers = players.filter((p) => p.firstName.trim()).length;
+  const setPlayer = (i: number, patch: Partial<(typeof players)[number]>) =>
+    setPlayers((ps) => ps.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+  // Total de los jugadores con nombre cargado.
+  const playersTotal = players
+    .filter((p) => p.firstName.trim())
+    .reduce((sum, p) => sum + (playerPrice(p.isSocio, p.hasAbono, pricing) ?? 0), 0);
+
+  // Productos elegidos (cantidad por producto) + su total.
+  const [productQty, setProductQty] = useState<Record<string, number>>({});
+  const products = info?.products ?? [];
+  const setQty = (id: string, q: number) => setProductQty((m) => ({ ...m, [id]: Math.max(0, q) }));
+  const productsTotal = products.reduce(
+    (s, p) => s + (p.price ?? 0) * (productQty[p.variantId] ?? 0),
+    0,
+  );
+  // Base = jugadores con precio configurado; si no hay, el precio del servicio/cancha.
+  // (Mismo criterio que el backend al reservar.) Después se suman los productos.
+  const hasPlayerPrice = players.some(
+    (p) => p.firstName.trim() && playerPrice(p.isSocio, p.hasAbono, pricing) != null,
+  );
+  const servicePrice = service?.price != null ? Number(service.price) : 0;
+  const baseTotal = hasPlayerPrice ? playersTotal : servicePrice;
+  const grandTotal = baseTotal + productsTotal;
+
+  useEffect(() => setSlot(null), [service, date, court]);
 
   const { data: slots, isFetching: loadingSlots } = useQuery({
     queryKey: ['portal', 'availability', service?.id, date],
@@ -60,17 +100,19 @@ export default function PortalPage() {
     enabled: !!service,
   });
 
-  // Un botón por horario (si hay varios profesionales a la misma hora, tomamos el primero).
+  // Horarios a mostrar. En modo club, si eligió una cancha filtramos por esa;
+  // si no, un botón por horario (tomando la primera cancha libre a esa hora).
   const uniqueSlots = useMemo(() => {
     const seen = new Set<string>();
     const out: { startAt: string; resourceId: string }[] = [];
     for (const s of slots ?? []) {
+      if (canchas && court && s.resourceId !== court) continue;
       if (seen.has(s.startAt)) continue;
       seen.add(s.startAt);
       out.push({ startAt: s.startAt, resourceId: s.resourceId });
     }
     return out;
-  }, [slots]);
+  }, [slots, canchas, court]);
 
   const book = useMutation({
     mutationFn: () =>
@@ -81,6 +123,19 @@ export default function PortalPage() {
         date,
         firstName: firstName.trim(),
         phone: phone.trim(),
+        players: askPlayers
+          ? players
+              .filter((p) => p.firstName.trim())
+              .map((p) => ({
+                firstName: p.firstName.trim(),
+                lastName: p.lastName.trim(),
+                isSocio: p.isSocio,
+                hasAbono: p.isSocio && p.hasAbono,
+              }))
+          : undefined,
+        products: Object.entries(productQty)
+          .filter(([, q]) => q > 0)
+          .map(([variantId, qty]) => ({ variantId, qty })),
       }),
     onSuccess: (r) => {
       const prof = (info?.resources ?? []).find((x) => x.id === slot!.resourceId);
@@ -111,8 +166,20 @@ export default function PortalPage() {
           <p className="text-sm text-[var(--color-muted-foreground)]">
             {service?.name} · {fmtLongDate(date)} a las {fmtTime(done.startAt)}.
           </p>
+          {canchas && done.resourceName && (
+            <p className="flex items-center gap-1.5 text-sm font-medium">
+              <MapPin className="h-4 w-4 text-[var(--color-primary)]" /> {done.resourceName}
+            </p>
+          )}
           <p className="text-sm text-[var(--color-muted-foreground)]">Te esperamos 🙌</p>
         </div>
+
+        {canchas && (
+          <div>
+            <p className="mb-2 text-sm font-medium">Ubicación de tu cancha</p>
+            <CourtMap courts={info.resources} selectedId={done.resourceId} />
+          </div>
+        )}
 
         <ReviewForm
           resourceId={done.resourceId}
@@ -130,6 +197,11 @@ export default function PortalPage() {
             setSlot(null);
             setFirstName('');
             setPhone('');
+            setPlayers([
+              { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+              { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+            ]);
+            setProductQty({});
           }}
         >
           Reservar otro turno
@@ -162,7 +234,12 @@ export default function PortalPage() {
                 <p className="text-sm font-medium">{s.name}</p>
                 <p className="flex items-center gap-1.5 text-xs text-[var(--color-muted-foreground)]">
                   <Clock className="h-3 w-3" /> {s.durationMin} min
-                  {s.price != null && <span>· ${Number(s.price).toLocaleString('es-AR')}</span>}
+                  {s.price != null && (
+                    <span>
+                      · ${Number(s.price).toLocaleString('es-AR')}
+                      {s.priceUnit && ` ${PRICE_UNIT_LABELS[s.priceUnit]}`}
+                    </span>
+                  )}
                 </p>
               </div>
             </button>
@@ -170,9 +247,36 @@ export default function PortalPage() {
         </div>
       </Section>
 
-      {/* 2. Día + horario */}
+      {/* Mapa de canchas (modo club): elegí tu cancha o mirá dónde queda */}
+      {service && canchas && (
+        <Section step={2} title="Elegí tu cancha">
+          <CourtMap courts={info.resources} selectedId={court} onSelect={(id) => setCourt(id === court ? null : id)} />
+          {court ? (
+            <p className="mt-2 flex items-center gap-1.5 text-sm">
+              <MapPin className="h-4 w-4 text-[var(--color-primary)]" />
+              {(() => {
+                const c = info.resources.find((r) => r.id === court);
+                if (!c) return null;
+                return (
+                  <span>
+                    <span className="font-medium">{c.name}</span>
+                    {c.sport && <span className="text-[var(--color-muted-foreground)]"> · {SPORT_LABELS[c.sport]}</span>}
+                    {c.surface && <span className="text-[var(--color-muted-foreground)]"> · {c.surface}</span>}
+                  </span>
+                );
+              })()}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-[var(--color-muted-foreground)]">
+              Tocá una cancha para ver solo sus horarios, o elegí el horario directo abajo.
+            </p>
+          )}
+        </Section>
+      )}
+
+      {/* 2/3. Día + horario */}
       {service && (
-        <Section step={2} title="Elegí día y horario">
+        <Section step={canchas ? 3 : 2} title="Elegí día y horario">
           <div className="mb-3 flex items-center gap-2">
             <Button
               variant="outline"
@@ -231,9 +335,9 @@ export default function PortalPage() {
         </Section>
       )}
 
-      {/* 3. Datos + confirmar */}
+      {/* 3/4. Datos + confirmar */}
       {service && slot && (
-        <Section step={3} title="Tus datos">
+        <Section step={canchas ? 4 : 3} title="Tus datos">
           <div className="space-y-3">
             <div className="flex flex-col gap-1.5">
               <Label>Nombre</Label>
@@ -244,10 +348,158 @@ export default function PortalPage() {
               <PhoneInput onChange={setPhone} placeholder="341 1234567" />
             </div>
           </div>
+
+          {askPlayers && (
+            <div className="mt-4 space-y-2">
+              <p className="text-sm font-medium">Jugadores</p>
+              <p className="text-xs text-[var(--color-muted-foreground)]">
+                Cargá el nombre de cada jugador (mínimo 2) y marcá si es socio del club.
+              </p>
+              {players.map((p, i) => (
+                <div key={i} className="space-y-2 rounded-[var(--radius)] border border-[var(--color-border)] p-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-4 shrink-0 text-xs text-[var(--color-muted-foreground)]">{i + 1}.</span>
+                    <Input
+                      value={p.firstName}
+                      onChange={(e) => setPlayer(i, { firstName: e.target.value })}
+                      placeholder="Nombre"
+                      className="flex-1"
+                    />
+                    {players.length > 2 && (
+                      <button
+                        type="button"
+                        onClick={() => setPlayers((ps) => ps.filter((_, idx) => idx !== i))}
+                        className="shrink-0 text-[var(--color-muted-foreground)] hover:text-[var(--color-destructive)]"
+                        title="Quitar"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  <Input
+                    value={p.lastName}
+                    onChange={(e) => setPlayer(i, { lastName: e.target.value })}
+                    placeholder="Apellido"
+                    className="ml-6 w-[calc(100%-1.5rem)]"
+                  />
+                  <div className="ml-6 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                    <label className="flex cursor-pointer items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={p.isSocio}
+                        onChange={(e) => setPlayer(i, { isSocio: e.target.checked, hasAbono: e.target.checked && p.hasAbono })}
+                        className="h-4 w-4 accent-[var(--color-primary)]"
+                      />
+                      Socio del club
+                    </label>
+                    {p.isSocio && (
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={p.hasAbono}
+                          onChange={(e) => setPlayer(i, { hasAbono: e.target.checked })}
+                          className="h-4 w-4 accent-[var(--color-primary)]"
+                        />
+                        Abono de tenis
+                      </label>
+                    )}
+                    {hasPricing && p.firstName.trim() && (
+                      <span className="ml-auto text-sm font-medium">
+                        {(() => {
+                          const pr = playerPrice(p.isSocio, p.hasAbono, pricing);
+                          return pr != null ? `$${pr.toLocaleString('es-AR')}` : '—';
+                        })()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {players.length < 12 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => setPlayers((ps) => [...ps, { firstName: '', lastName: '', isSocio: false, hasAbono: false }])}
+                >
+                  <Plus className="h-4 w-4" /> Agregar jugador
+                </Button>
+              )}
+            </div>
+          )}
+
+          {products.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <p className="text-sm font-medium">Productos (opcional)</p>
+              {products.map((p) => {
+                const q = productQty[p.variantId] ?? 0;
+                const soldOut = p.available <= 0;
+                const atMax = q >= p.available;
+                return (
+                  <div
+                    key={p.variantId}
+                    className="flex items-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] p-2.5"
+                  >
+                    {p.imageUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.imageUrl} alt="" className="h-10 w-10 shrink-0 rounded-[var(--radius)] object-cover" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{p.name}</p>
+                      <p className="text-xs text-[var(--color-muted-foreground)]">
+                        {p.price != null && <span>${p.price.toLocaleString('es-AR')}</span>}
+                        {soldOut ? (
+                          <span className="text-[var(--color-destructive)]"> · sin stock</span>
+                        ) : (
+                          <span> · {p.available} disp.</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        disabled={q <= 0}
+                        onClick={() => setQty(p.variantId, q - 1)}
+                      >
+                        −
+                      </Button>
+                      <span className="w-6 text-center text-sm tabular-nums">{q}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        disabled={soldOut || atMax}
+                        onClick={() => setQty(p.variantId, q + 1)}
+                      >
+                        +
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {grandTotal > 0 && (
+            <div className="mt-3 flex items-center justify-between border-t border-[var(--color-border)] pt-2 text-base font-semibold">
+              <span>Total a pagar</span>
+              <span>${grandTotal.toLocaleString('es-AR')}</span>
+            </div>
+          )}
+
           <Button
             className="mt-4 w-full"
             onClick={() => book.mutate()}
-            disabled={book.isPending || !firstName.trim() || phone.trim().length < 5}
+            disabled={
+              book.isPending ||
+              !firstName.trim() ||
+              phone.trim().length < 5 ||
+              (askPlayers && validPlayers < 2)
+            }
           >
             <CalendarCheck className="h-4 w-4" />
             {book.isPending ? 'Reservando…' : `Reservar ${fmtTime(slot.startAt)}`}

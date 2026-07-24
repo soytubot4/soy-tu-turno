@@ -1,7 +1,13 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { PortalBookInput, PortalReviewInput } from '@soytuturno/shared';
+import {
+  playerPrice,
+  isWeekendDate,
+  type PortalBookInput,
+  type PortalReviewInput,
+} from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
 import { AvailabilityService } from '@/appointments/availability.service';
+import { ProductsService } from '@/products/products.service';
 
 type Tx = Parameters<Parameters<PrismaService['tenantSafe']>[0]>[0];
 
@@ -22,6 +28,7 @@ export class PortalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly availability: AvailabilityService,
+    private readonly products: ProductsService,
   ) {}
 
   private async tenantId(slug: string): Promise<string> {
@@ -36,19 +43,44 @@ export class PortalService {
     const base = await this.prisma.tenantSafe(async (tx) => {
       const tenant = await tx.tenant.findFirst({
         where: { id: tenantId },
-        select: { name: true, logoUrl: true, address: true, phone: true, currency: true },
+        select: {
+          name: true,
+          logoUrl: true,
+          address: true,
+          phone: true,
+          currency: true,
+          turnoConfig: true,
+        },
       });
       const services = await tx.service.findMany({
         where: { active: true, tenantId },
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-        select: { id: true, name: true, description: true, durationMin: true, price: true },
+        select: { id: true, name: true, description: true, durationMin: true, price: true, priceUnit: true },
       });
       const resources = await tx.resource.findMany({
-        where: { active: true, tenantId },
+        // Canchas de alquiler activas + todas las referencias del mapa (bar,
+        // entrada, etc.) aunque estén inactivas — se ven pero no se reservan.
+        where: { tenantId, OR: [{ reference: true }, { active: true }] },
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-        select: { id: true, name: true, title: true, avatarUrl: true },
+        select: {
+          id: true,
+          name: true,
+          title: true,
+          avatarUrl: true,
+          color: true,
+          sport: true,
+          surface: true,
+          reference: true,
+          mapX: true,
+          mapY: true,
+          mapW: true,
+          mapH: true,
+          mapRotation: true,
+        },
       });
-      return { tenant, services, resources };
+      const cfg0 = (tenant?.turnoConfig ?? {}) as Record<string, unknown>;
+      const products = cfg0.productsEnabled === true ? await this.products.offerings(tx, tenantId) : [];
+      return { tenant, services, resources, products };
     }, tenantId);
 
     // Ratings en una tx aparte y tolerante: si la tabla reviews aún no se creó,
@@ -71,10 +103,29 @@ export class PortalService {
       // tabla reviews todavía no creada
     }
 
+    const cfg = (base.tenant?.turnoConfig ?? {}) as Record<string, unknown>;
+    const { turnoConfig: _omit, ...tenantPublic } = base.tenant ?? {};
+    const num = (v: unknown) => (typeof v === 'number' ? v : null);
     return {
-      tenant: base.tenant,
+      tenant: tenantPublic,
+      canchas: cfg.canchas === true,
+      askPlayers: cfg.askPlayers === true,
+      playerPricing: {
+        weekendEnabled: cfg.priceWeekendEnabled === true,
+        weekday: {
+          socioAbono: num(cfg.priceSocioAbono),
+          socioSinAbono: num(cfg.priceSocioSinAbono),
+          noSocio: num(cfg.priceNoSocio),
+        },
+        weekend: {
+          socioAbono: num(cfg.priceSocioAbonoWknd),
+          socioSinAbono: num(cfg.priceSocioSinAbonoWknd),
+          noSocio: num(cfg.priceNoSocioWknd),
+        },
+      },
       rating: business,
       services: base.services,
+      products: base.products,
       resources: base.resources.map((r) => ({ ...r, rating: ratingOf(byResource.get(r.id) ?? []) })),
     };
   }
@@ -158,6 +209,48 @@ export class PortalService {
       if (clash) throw new ConflictException('Ese horario ya no está disponible');
 
       try {
+        // Precios por jugador (según socio + abono de tenis), tomados de la config.
+        const tenant = await tx.tenant.findUnique({
+          where: { id: tenantId },
+          select: { turnoConfig: true },
+        });
+        const cfg = (tenant?.turnoConfig ?? {}) as Record<string, unknown>;
+        const num = (v: unknown) => (typeof v === 'number' ? v : null);
+        // Fin de semana (si está habilitado el precio diferenciado) → usa el set de finde.
+        const weekend = cfg.priceWeekendEnabled === true && isWeekendDate(input.date);
+        const pricing = weekend
+          ? {
+              socioAbono: num(cfg.priceSocioAbonoWknd),
+              socioSinAbono: num(cfg.priceSocioSinAbonoWknd),
+              noSocio: num(cfg.priceNoSocioWknd),
+            }
+          : {
+              socioAbono: num(cfg.priceSocioAbono),
+              socioSinAbono: num(cfg.priceSocioSinAbono),
+              noSocio: num(cfg.priceNoSocio),
+            };
+        const players = (input.players ?? [])
+          .filter((p) => p.firstName?.trim())
+          .map((p) => {
+            const isSocio = !!p.isSocio;
+            const hasAbono = isSocio && !!p.hasAbono;
+            return {
+              firstName: p.firstName.trim(),
+              lastName: (p.lastName ?? '').trim(),
+              isSocio,
+              hasAbono,
+              price: playerPrice(isSocio, hasAbono, pricing),
+            };
+          });
+        const playersTotal = players.reduce((sum, p) => sum + (p.price ?? 0), 0);
+        const hasAnyPrice = players.some((p) => p.price != null);
+
+        // Reserva de productos (descuenta stock dentro de la misma tx).
+        const reserved = await this.products.reserve(tx, tenantId, input.products ?? []);
+        const productsTotal = reserved.reduce((s, p) => s + (p.price ?? 0) * p.qty, 0);
+
+        const baseTotal = hasAnyPrice ? playersTotal : service.price != null ? Number(service.price) : 0;
+        const anyPrice = hasAnyPrice || service.price != null || productsTotal > 0;
         const appt = await tx.appointment.create({
           data: {
             tenantId,
@@ -168,7 +261,9 @@ export class PortalService {
             endAt,
             status: 'CONFIRMED',
             source: 'WEB',
-            priceAtBooking: service.price ?? null,
+            priceAtBooking: anyPrice ? baseTotal + productsTotal : null,
+            players: players.length ? players : undefined,
+            products: reserved.length ? reserved : undefined,
           },
           select: { id: true, startAt: true, endAt: true },
         });

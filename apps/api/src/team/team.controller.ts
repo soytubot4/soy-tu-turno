@@ -1,9 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import {
   inviteMemberSchema,
   updateMemberRoleSchema,
+  updateRolesConfigSchema,
   type InviteMemberInput,
   type UpdateMemberRoleInput,
+  type UpdateRolesConfigInput,
 } from '@soytuturno/shared';
 import { ZodValidationPipe } from '@/common/pipes/zod-validation.pipe';
 import { TeamService } from './team.service';
@@ -15,6 +17,18 @@ export class TeamController {
   @Get('members')
   async list() {
     return { ok: true, data: await this.service.list() };
+  }
+
+  @Get('roles')
+  async roles() {
+    return { ok: true, data: await this.service.getRolesConfig() };
+  }
+
+  @Put('roles')
+  async saveRoles(
+    @Body(new ZodValidationPipe(updateRolesConfigSchema)) body: UpdateRolesConfigInput,
+  ) {
+    return { ok: true, data: await this.service.saveRolesConfig(body) };
   }
 
   @Post('invite')

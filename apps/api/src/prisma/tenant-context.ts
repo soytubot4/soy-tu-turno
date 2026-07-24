@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { RolePermissionsOverrides } from '@soytuturno/shared';
 
 export type TenantContext = {
   tenantId: string;
@@ -9,6 +10,8 @@ export type TenantContext = {
   isSuperAdmin?: boolean;
   /** Email del user (snapshot). Opcional: tokens viejos quizás no lo traen. */
   email?: string;
+  /** Overrides de permisos por rol del tenant (RBAC configurable). */
+  overrides?: RolePermissionsOverrides;
 };
 
 /**

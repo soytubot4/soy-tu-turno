@@ -8,6 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { Observable, from, switchMap } from 'rxjs';
 import type { Request } from 'express';
+import type { RolePermissionsOverrides } from '@soytuturno/shared';
 import { tenantStorage } from '@/prisma/tenant-context';
 import { PrismaService } from '@/prisma/prisma.service';
 import { IS_PUBLIC_KEY } from '@/auth/decorators/public.decorator';
@@ -73,6 +74,18 @@ export class TenantContextInterceptor implements NestInterceptor {
       }
     }
 
+    // Overrides de permisos del tenant (RBAC configurable). Solo hacen falta para
+    // roles editables: OWNER/superadmin tienen todo y PENDING nada, sin consultar.
+    let overrides: RolePermissionsOverrides | undefined;
+    if (!userIsSuperAdmin && role !== 'OWNER' && role !== 'PENDING') {
+      const t = await this.prisma.tenant.findUnique({
+        where: { id: tenantId! },
+        select: { turnoConfig: true },
+      });
+      const cfg = (t?.turnoConfig ?? {}) as Record<string, unknown>;
+      overrides = (cfg.rolePermissions as RolePermissionsOverrides | undefined) ?? undefined;
+    }
+
     return from(
       new Promise<Observable<unknown>>((resolve) => {
         tenantStorage.run(
@@ -82,6 +95,7 @@ export class TenantContextInterceptor implements NestInterceptor {
             role,
             isSuperAdmin: userIsSuperAdmin,
             email: user.email ?? undefined,
+            overrides,
           },
           () => resolve(next.handle()),
         );
