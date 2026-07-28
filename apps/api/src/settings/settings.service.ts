@@ -14,6 +14,8 @@ function readCfg(turnoConfig: unknown) {
     minLeadMinutes: typeof cfg.minLeadMinutes === 'number' && cfg.minLeadMinutes >= 0 ? cfg.minLeadMinutes : 0,
     askPlayers: cfg.askPlayers === true,
     productsEnabled: cfg.productsEnabled === true,
+    // Aparecer en el directorio público (soytuturno.com). Por defecto sí.
+    listedOnLanding: cfg.listedOnLanding !== false,
     priceSocioAbono: typeof cfg.priceSocioAbono === 'number' ? cfg.priceSocioAbono : null,
     priceSocioSinAbono: typeof cfg.priceSocioSinAbono === 'number' ? cfg.priceSocioSinAbono : null,
     priceNoSocio: typeof cfg.priceNoSocio === 'number' ? cfg.priceNoSocio : null,
@@ -58,6 +60,7 @@ export class SettingsService {
       if (input.minLeadMinutes !== undefined) next.minLeadMinutes = input.minLeadMinutes;
       if (input.askPlayers !== undefined) next.askPlayers = input.askPlayers;
       if (input.productsEnabled !== undefined) next.productsEnabled = input.productsEnabled;
+      if (input.listedOnLanding !== undefined) next.listedOnLanding = input.listedOnLanding;
       if (input.priceSocioAbono !== undefined) next.priceSocioAbono = input.priceSocioAbono;
       if (input.priceSocioSinAbono !== undefined) next.priceSocioSinAbono = input.priceSocioSinAbono;
       if (input.priceNoSocio !== undefined) next.priceNoSocio = input.priceNoSocio;

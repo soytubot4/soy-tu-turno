@@ -27,9 +27,15 @@ export class PublicService {
         businessType: true,
         logoUrl: true,
         address: true,
+        turnoConfig: true,
       },
     });
-    if (!tenants.length) return [];
+    // El comercio puede optar por NO aparecer en el directorio público
+    // (turnoConfig.listedOnLanding === false). Por defecto aparece.
+    const listed = tenants.filter(
+      (t) => ((t.turnoConfig ?? {}) as Record<string, unknown>).listedOnLanding !== false,
+    );
+    if (!listed.length) return [];
 
     // Rating agregado por comercio (tolerante: si la tabla reviews aún no existe,
     // el marketplace igual funciona sin ratings).
@@ -37,7 +43,7 @@ export class PublicService {
     try {
       const agg = await this.prisma.review.groupBy({
         by: ['tenantId'],
-        where: { tenantId: { in: tenants.map((t) => t.id) } },
+        where: { tenantId: { in: listed.map((t) => t.id) } },
         _avg: { rating: true },
         _count: { _all: true },
       });
@@ -46,7 +52,7 @@ export class PublicService {
       // tabla reviews todavía no creada
     }
 
-    return tenants.map((t) => {
+    return listed.map((t) => {
       const r = byTenant.get(t.id);
       return {
         slug: t.slug,

@@ -11,6 +11,7 @@ export type TurnoSettings = {
   minLeadMinutes: number;
   askPlayers: boolean;
   productsEnabled: boolean;
+  listedOnLanding: boolean;
   priceSocioAbono: number | null;
   priceSocioSinAbono: number | null;
   priceNoSocio: number | null;

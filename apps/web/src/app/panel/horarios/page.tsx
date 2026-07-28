@@ -68,6 +68,8 @@ export default function HorariosPage() {
 
       {canSettings && <ProductsToggleCard />}
 
+      {canSettings && <DirectoryToggleCard />}
+
       {canSettings && canchas && <PlayersToggleCard />}
 
       {canSettings && canchas && <PlayerPricingCard />}
@@ -198,6 +200,49 @@ function ProductsToggleCard() {
               className="h-4 w-4 accent-[var(--color-primary)]"
             />
             <span className="text-sm">Ofrecer productos para reservar con el turno</span>
+          </label>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Prende/apaga que el negocio aparezca en el directorio público (landing). */
+function DirectoryToggleCard() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const save = useMutation({
+    mutationFn: (v: boolean) => updateTurnoSettings({ listedOnLanding: v }),
+    onSuccess: () => {
+      toast.success('Guardado');
+      qc.invalidateQueries({ queryKey: ['turno-settings'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const on = data?.listedOnLanding ?? true;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Directorio público</CardTitle>
+        <CardDescription>
+          Si está prendido, tu negocio aparece en <span className="font-medium">soytuturno.com</span> para que
+          cualquiera te encuentre y reserve. Apagalo si preferís recibir turnos solo por tu propio link.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>
+        ) : (
+          <label className="flex cursor-pointer items-center gap-3">
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={(e) => save.mutate(e.target.checked)}
+              disabled={save.isPending}
+              className="h-4 w-4 accent-[var(--color-primary)]"
+            />
+            <span className="text-sm">Aparecer en el directorio público de soytuturno.com</span>
           </label>
         )}
       </CardContent>

@@ -467,6 +467,8 @@ export const updateTurnoSettingsSchema = z.object({
   askPlayers: z.boolean().optional(),
   // Habilitar productos propios (el comercio los ofrece para reservar con el turno).
   productsEnabled: z.boolean().optional(),
+  // Aparecer en el directorio público (landing de soytuturno.com).
+  listedOnLanding: z.boolean().optional(),
   // Precios por jugador según su condición (para clubes que cobran por jugador).
   priceSocioAbono: z.coerce.number().nonnegative().nullable().optional(),
   priceSocioSinAbono: z.coerce.number().nonnegative().nullable().optional(),
