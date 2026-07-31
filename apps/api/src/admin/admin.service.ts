@@ -8,6 +8,7 @@ import {
 } from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
 import { SupabaseAdminService } from '@/auth/supabase-admin.service';
+import { DomainProvisioningService } from '@/digital-ocean/domain-provisioning.service';
 
 const DEFAULT_TIMEZONE = 'America/Argentina/Buenos_Aires';
 
@@ -23,6 +24,7 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly supabase: SupabaseAdminService,
+    private readonly domains: DomainProvisioningService,
   ) {}
 
   /** Crea un comercio nuevo con el turnero activo e invita al dueño por email. */
@@ -30,6 +32,7 @@ export class AdminService {
     const exists = await this.prisma.tenant.findUnique({ where: { slug: input.slug } });
     if (exists) throw new ConflictException(`El slug '${input.slug}' ya está en uso`);
 
+    const doOn = this.domains.enabled;
     const tenant = await this.prisma.tenant.create({
       data: {
         slug: input.slug,
@@ -44,9 +47,9 @@ export class AdminService {
           minLeadMinutes: 0,
           canchas: input.canchas === true, // modo club deportivo
         },
-        // soytuturno no usa el aprovisionamiento de dominios de soytucanje.
-        staffDomainStatus: 'NOT_APPLICABLE',
-        customerDomainStatus: 'NOT_APPLICABLE',
+        // Provisioning de dominios: PENDING si DigitalOcean está configurado; si no, NOT_APPLICABLE.
+        staffDomainStatus: doOn ? 'PENDING' : 'NOT_APPLICABLE',
+        customerDomainStatus: doOn ? 'PENDING' : 'NOT_APPLICABLE',
       },
       select: { id: true, slug: true, name: true },
     });
@@ -83,6 +86,12 @@ export class AdminService {
       this.logger.error(`Error invitando al OWNER de ${tenant.slug}: ${(err as Error).message}`);
     }
 
+    // Provisionar los subdominios en DigitalOcean (staff + customer). Best-effort:
+    // si algo falla queda FAILED y se puede reintentar desde el panel.
+    if (doOn) {
+      await this.runDomainProvisioning(tenant.id, tenant.slug, { staff: true, customer: true });
+    }
+
     return { tenant, ownerCreated, supabaseEnabled: this.supabase.enabled };
   }
 
@@ -90,7 +99,7 @@ export class AdminService {
   async updateTenant(id: string, input: AdminUpdateTenantInput) {
     const tenant = await this.prisma.tenant.findUnique({
       where: { id },
-      select: { id: true, turnoConfig: true },
+      select: { id: true, slug: true, turnoConfig: true, staffDomainStatus: true, customerDomainStatus: true },
     });
     if (!tenant) throw new NotFoundException('Comercio no encontrado');
 
@@ -114,11 +123,36 @@ export class AdminService {
       data.turnoConfig = { ...cfg, timezone: input.timezone.trim() } as Prisma.InputJsonValue;
     }
 
-    return this.prisma.tenant.update({
+    const updated = await this.prisma.tenant.update({
       where: { id },
       data,
       select: { id: true, slug: true, name: true },
     });
+
+    // Si cambió el slug, des-provisionar los dominios viejos y re-provisionar con el nuevo.
+    if (input.slug !== undefined && input.slug !== tenant.slug && this.domains.enabled) {
+      if (tenant.staffDomainStatus === 'PROVISIONED') {
+        try {
+          await this.domains.unprovisionStaffDomain(tenant.slug);
+        } catch (e) {
+          this.logger.warn(`Unprovision staff ${tenant.slug}: ${(e as Error).message}`);
+        }
+      }
+      if (tenant.customerDomainStatus === 'PROVISIONED') {
+        try {
+          await this.domains.unprovisionCustomerDomain(tenant.slug);
+        } catch (e) {
+          this.logger.warn(`Unprovision customer ${tenant.slug}: ${(e as Error).message}`);
+        }
+      }
+      await this.prisma.tenant.update({
+        where: { id },
+        data: { staffDomainStatus: 'PENDING', customerDomainStatus: 'PENDING', domainError: null },
+      });
+      await this.runDomainProvisioning(id, updated.slug, { staff: true, customer: true });
+    }
+
+    return updated;
   }
 
   /**
@@ -129,7 +163,7 @@ export class AdminService {
   async deleteTenant(id: string) {
     const tenant = await this.prisma.tenant.findUnique({
       where: { id },
-      select: { id: true, enabledProducts: true },
+      select: { id: true, slug: true, enabledProducts: true, staffDomainStatus: true, customerDomainStatus: true },
     });
     if (!tenant) throw new NotFoundException('Comercio no encontrado');
 
@@ -146,6 +180,23 @@ export class AdminService {
       (tx) => tx.user.findMany({ where: { tenantId: id }, select: { supabaseUserId: true } }),
       id,
     );
+    // Des-provisionar los subdominios antes de borrar (best-effort, no bloquea).
+    if (this.domains.enabled) {
+      if (tenant.staffDomainStatus === 'PROVISIONED') {
+        try {
+          await this.domains.unprovisionStaffDomain(tenant.slug);
+        } catch (e) {
+          this.logger.warn(`Unprovision staff ${tenant.slug}: ${(e as Error).message}`);
+        }
+      }
+      if (tenant.customerDomainStatus === 'PROVISIONED') {
+        try {
+          await this.domains.unprovisionCustomerDomain(tenant.slug);
+        } catch (e) {
+          this.logger.warn(`Unprovision customer ${tenant.slug}: ${(e as Error).message}`);
+        }
+      }
+    }
     await this.prisma.tenant.delete({ where: { id } });
     for (const u of users) {
       await this.supabase.deleteAuthUser(u.supabaseUserId);
@@ -218,5 +269,72 @@ export class AdminService {
       turnoEnabled: updated.enabledProducts.includes(TURNO_FEATURE_KEY),
       turnoConfig: updated.turnoConfig,
     };
+  }
+
+  /** Re-provisiona los dominios que no estén PROVISIONED (endpoint de reintento). */
+  async reprovisionDomains(id: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id },
+      select: { id: true, slug: true, staffDomainStatus: true, customerDomainStatus: true },
+    });
+    if (!tenant) throw new NotFoundException('Comercio no encontrado');
+    if (!this.domains.enabled) {
+      throw new ConflictException('DigitalOcean no está configurado en este entorno');
+    }
+    return this.runDomainProvisioning(id, tenant.slug, {
+      staff: tenant.staffDomainStatus !== 'PROVISIONED',
+      customer: tenant.customerDomainStatus !== 'PROVISIONED',
+    });
+  }
+
+  /**
+   * Provisiona las superficies indicadas contra DigitalOcean y persiste el estado
+   * (PROVISIONED/FAILED + domainError) en el tenant. No lanza: acumula errores.
+   */
+  private async runDomainProvisioning(
+    tenantId: string,
+    slug: string,
+    which: { staff: boolean; customer: boolean },
+  ) {
+    const errors: string[] = [];
+    const data: Prisma.TenantUpdateInput = {};
+
+    if (which.staff) {
+      try {
+        await this.domains.provisionStaffDomain(slug);
+        data.staffDomainStatus = 'PROVISIONED';
+      } catch (e) {
+        const msg = (e as Error).message;
+        this.logger.error(`Provisioning staff ${slug}: ${msg}`);
+        data.staffDomainStatus = 'FAILED';
+        errors.push(`staff: ${msg}`);
+      }
+    }
+    if (which.customer) {
+      try {
+        await this.domains.provisionCustomerDomain(slug);
+        data.customerDomainStatus = 'PROVISIONED';
+      } catch (e) {
+        const msg = (e as Error).message;
+        this.logger.error(`Provisioning customer ${slug}: ${msg}`);
+        data.customerDomainStatus = 'FAILED';
+        errors.push(`customer: ${msg}`);
+      }
+    }
+    data.domainError = errors.length ? errors.join(' | ') : null;
+    if (!errors.length) data.domainProvisionedAt = new Date();
+
+    return this.prisma.tenant.update({
+      where: { id: tenantId },
+      data,
+      select: {
+        id: true,
+        slug: true,
+        staffDomainStatus: true,
+        customerDomainStatus: true,
+        domainError: true,
+        domainProvisionedAt: true,
+      },
+    });
   }
 }

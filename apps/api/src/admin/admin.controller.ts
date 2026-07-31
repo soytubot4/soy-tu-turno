@@ -50,4 +50,10 @@ export class AdminController {
   ) {
     return { ok: true, data: await this.service.updateTurno(id, body) };
   }
+
+  /** Reintenta el provisioning de dominios en DigitalOcean (para los que quedaron FAILED). */
+  @Post('tenants/:id/reprovision-domains')
+  async reprovisionDomains(@Param('id') id: string) {
+    return { ok: true, data: await this.service.reprovisionDomains(id) };
+  }
 }
