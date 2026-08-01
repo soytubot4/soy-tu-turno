@@ -16,13 +16,8 @@ function readCfg(turnoConfig: unknown) {
     productsEnabled: cfg.productsEnabled === true,
     // Aparecer en el directorio público (soytuturno.com). Por defecto sí.
     listedOnLanding: cfg.listedOnLanding !== false,
-    priceSocioAbono: typeof cfg.priceSocioAbono === 'number' ? cfg.priceSocioAbono : null,
-    priceSocioSinAbono: typeof cfg.priceSocioSinAbono === 'number' ? cfg.priceSocioSinAbono : null,
-    priceNoSocio: typeof cfg.priceNoSocio === 'number' ? cfg.priceNoSocio : null,
+    // Los precios por persona viven en player_categories (uno por categoría).
     priceWeekendEnabled: cfg.priceWeekendEnabled === true,
-    priceSocioAbonoWknd: typeof cfg.priceSocioAbonoWknd === 'number' ? cfg.priceSocioAbonoWknd : null,
-    priceSocioSinAbonoWknd: typeof cfg.priceSocioSinAbonoWknd === 'number' ? cfg.priceSocioSinAbonoWknd : null,
-    priceNoSocioWknd: typeof cfg.priceNoSocioWknd === 'number' ? cfg.priceNoSocioWknd : null,
   };
 }
 
@@ -61,13 +56,7 @@ export class SettingsService {
       if (input.askPlayers !== undefined) next.askPlayers = input.askPlayers;
       if (input.productsEnabled !== undefined) next.productsEnabled = input.productsEnabled;
       if (input.listedOnLanding !== undefined) next.listedOnLanding = input.listedOnLanding;
-      if (input.priceSocioAbono !== undefined) next.priceSocioAbono = input.priceSocioAbono;
-      if (input.priceSocioSinAbono !== undefined) next.priceSocioSinAbono = input.priceSocioSinAbono;
-      if (input.priceNoSocio !== undefined) next.priceNoSocio = input.priceNoSocio;
       if (input.priceWeekendEnabled !== undefined) next.priceWeekendEnabled = input.priceWeekendEnabled;
-      if (input.priceSocioAbonoWknd !== undefined) next.priceSocioAbonoWknd = input.priceSocioAbonoWknd;
-      if (input.priceSocioSinAbonoWknd !== undefined) next.priceSocioSinAbonoWknd = input.priceSocioSinAbonoWknd;
-      if (input.priceNoSocioWknd !== undefined) next.priceNoSocioWknd = input.priceNoSocioWknd;
 
       await tx.tenant.update({
         where: { id: ctx.tenantId },

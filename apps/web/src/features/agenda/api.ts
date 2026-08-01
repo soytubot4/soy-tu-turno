@@ -20,7 +20,16 @@ export type Appointment = {
   priceAtBooking: string | null;
   /** Jugadores/acompañantes cargados al reservar (si el comercio los pide). */
   players:
-    | { firstName: string; lastName?: string; isSocio?: boolean; hasAbono?: boolean; price?: number | null }[]
+    | {
+        firstName: string;
+        lastName?: string;
+        /** Nombre de la categoría al momento de reservar (histórico). */
+        categoryName?: string | null;
+        price?: number | null;
+        // Turnos viejos, de cuando la condición era socio + abono fijos.
+        isSocio?: boolean;
+        hasAbono?: boolean;
+      }[]
     | null;
   /** Productos reservados junto al turno. */
   products: { name: string; qty: number; price?: number | null }[] | null;

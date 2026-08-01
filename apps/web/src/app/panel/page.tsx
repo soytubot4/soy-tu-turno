@@ -496,7 +496,9 @@ function AppointmentDetailDialog({
                         <span>{[p.firstName, p.lastName].filter(Boolean).join(' ')}</span>
                         <span className="flex items-center gap-2">
                           <span className="text-xs text-[var(--color-muted-foreground)]">
-                            {p.isSocio ? (p.hasAbono ? 'socio c/abono' : 'socio') : 'no socio'}
+                            {p.categoryName ??
+                              // Turnos viejos: la condición era socio + abono.
+                              (p.isSocio ? (p.hasAbono ? 'socio c/abono' : 'socio') : 'no socio')}
                           </span>
                           {p.price != null && (
                             <span className="font-medium tabular-nums">${p.price.toLocaleString('es-AR')}</span>

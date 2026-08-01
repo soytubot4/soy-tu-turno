@@ -54,26 +54,31 @@ export default function PortalPage() {
   const [firstName, setFirstName] = useState('');
   const [phone, setPhone] = useState('');
   const [players, setPlayers] = useState<
-    { firstName: string; lastName: string; isSocio: boolean; hasAbono: boolean }[]
+    { firstName: string; lastName: string; categoryId: string | null }[]
   >([
-    { firstName: '', lastName: '', isSocio: false, hasAbono: false },
-    { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+    { firstName: '', lastName: '', categoryId: null },
+    { firstName: '', lastName: '', categoryId: null },
   ]);
   const [done, setDone] = useState<{ startAt: string; resourceId: string; resourceName: string } | null>(null);
 
   const canchas = !!info?.canchas;
   const askPlayers = !!info?.askPlayers;
-  const pp = info?.playerPricing;
-  const isWeekend = !!pp?.weekendEnabled && isWeekendDate(date);
-  const pricing = (isWeekend ? pp?.weekend : pp?.weekday) ?? { socioAbono: null, socioSinAbono: null, noSocio: null };
-  const hasPricing = pricing.socioAbono != null || pricing.socioSinAbono != null || pricing.noSocio != null;
+  // El servicio puede pedir los datos de las personas con una cantidad fija
+  // (ej: singles = 2, dobles = 4). Si no, cae al modo del comercio (mínimo 2).
+  const serviceAskPeople = !!service?.askPeople;
+  const showPlayers = serviceAskPeople || askPlayers;
+  const requiredPlayers = serviceAskPeople ? (service?.peopleCount ?? 2) : 2;
+  const fixedPlayers = serviceAskPeople && service?.peopleCount != null;
+  const categories = info?.playerCategories ?? [];
+  const isWeekend = !!info?.weekendPricing && isWeekendDate(date);
+  const hasPricing = categories.some((c) => c.price != null || c.priceWeekend != null);
   const validPlayers = players.filter((p) => p.firstName.trim()).length;
   const setPlayer = (i: number, patch: Partial<(typeof players)[number]>) =>
     setPlayers((ps) => ps.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
   // Total de los jugadores con nombre cargado.
   const playersTotal = players
     .filter((p) => p.firstName.trim())
-    .reduce((sum, p) => sum + (playerPrice(p.isSocio, p.hasAbono, pricing) ?? 0), 0);
+    .reduce((sum, p) => sum + (playerPrice(p.categoryId, categories, isWeekend) ?? 0), 0);
 
   // Productos elegidos (cantidad por producto) + su total.
   const [productQty, setProductQty] = useState<Record<string, number>>({});
@@ -86,13 +91,26 @@ export default function PortalPage() {
   // Base = jugadores con precio configurado; si no hay, el precio del servicio/cancha.
   // (Mismo criterio que el backend al reservar.) Después se suman los productos.
   const hasPlayerPrice = players.some(
-    (p) => p.firstName.trim() && playerPrice(p.isSocio, p.hasAbono, pricing) != null,
+    (p) => p.firstName.trim() && playerPrice(p.categoryId, categories, isWeekend) != null,
   );
   const servicePrice = service?.price != null ? Number(service.price) : 0;
   const baseTotal = hasPlayerPrice ? playersTotal : servicePrice;
   const grandTotal = baseTotal + productsTotal;
 
   useEffect(() => setSlot(null), [service, date, court]);
+
+  // Si el servicio pide una cantidad fija, dejamos exactamente esa cantidad de filas.
+  useEffect(() => {
+    if (!fixedPlayers) return;
+    setPlayers((ps) => {
+      if (ps.length === requiredPlayers) return ps;
+      const next = ps.slice(0, requiredPlayers);
+      while (next.length < requiredPlayers) {
+        next.push({ firstName: '', lastName: '', categoryId: null });
+      }
+      return next;
+    });
+  }, [fixedPlayers, requiredPlayers]);
 
   const { data: slots, isFetching: loadingSlots } = useQuery({
     queryKey: ['portal', 'availability', service?.id, date],
@@ -123,14 +141,13 @@ export default function PortalPage() {
         date,
         firstName: firstName.trim(),
         phone: phone.trim(),
-        players: askPlayers
+        players: showPlayers
           ? players
               .filter((p) => p.firstName.trim())
               .map((p) => ({
                 firstName: p.firstName.trim(),
                 lastName: p.lastName.trim(),
-                isSocio: p.isSocio,
-                hasAbono: p.isSocio && p.hasAbono,
+                categoryId: p.categoryId,
               }))
           : undefined,
         products: Object.entries(productQty)
@@ -198,8 +215,8 @@ export default function PortalPage() {
             setFirstName('');
             setPhone('');
             setPlayers([
-              { firstName: '', lastName: '', isSocio: false, hasAbono: false },
-              { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+              { firstName: '', lastName: '', categoryId: null },
+              { firstName: '', lastName: '', categoryId: null },
             ]);
             setProductQty({});
           }}
@@ -349,11 +366,13 @@ export default function PortalPage() {
             </div>
           </div>
 
-          {askPlayers && (
+          {showPlayers && (
             <div className="mt-4 space-y-2">
               <p className="text-sm font-medium">Jugadores</p>
               <p className="text-xs text-[var(--color-muted-foreground)]">
-                Cargá el nombre de cada jugador (mínimo 2) y marcá si es socio del club.
+                {fixedPlayers
+                  ? `Este turno es para ${requiredPlayers} personas: cargá el nombre de cada una.`
+                  : 'Cargá el nombre de cada jugador (mínimo 2) y elegí la categoría de cada uno.'}
               </p>
               {players.map((p, i) => (
                 <div key={i} className="space-y-2 rounded-[var(--radius)] border border-[var(--color-border)] p-2.5">
@@ -365,7 +384,7 @@ export default function PortalPage() {
                       placeholder="Nombre"
                       className="flex-1"
                     />
-                    {players.length > 2 && (
+                    {!fixedPlayers && players.length > 2 && (
                       <button
                         type="button"
                         onClick={() => setPlayers((ps) => ps.filter((_, idx) => idx !== i))}
@@ -376,51 +395,49 @@ export default function PortalPage() {
                       </button>
                     )}
                   </div>
+                  {/* Apellido + categoría son del modo club; si el servicio solo pide
+                      las personas, alcanza con el nombre. */}
+                  {askPlayers && (
                   <Input
                     value={p.lastName}
                     onChange={(e) => setPlayer(i, { lastName: e.target.value })}
                     placeholder="Apellido"
                     className="ml-6 w-[calc(100%-1.5rem)]"
                   />
-                  <div className="ml-6 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                    <label className="flex cursor-pointer items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={p.isSocio}
-                        onChange={(e) => setPlayer(i, { isSocio: e.target.checked, hasAbono: e.target.checked && p.hasAbono })}
-                        className="h-4 w-4 accent-[var(--color-primary)]"
-                      />
-                      Socio del club
-                    </label>
-                    {p.isSocio && (
-                      <label className="flex cursor-pointer items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={p.hasAbono}
-                          onChange={(e) => setPlayer(i, { hasAbono: e.target.checked })}
-                          className="h-4 w-4 accent-[var(--color-primary)]"
-                        />
-                        Abono de tenis
-                      </label>
-                    )}
+                  )}
+                  {askPlayers && categories.length > 0 && (
+                  <div className="ml-6 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <select
+                      className="h-9 flex-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-sm"
+                      value={p.categoryId ?? ''}
+                      onChange={(e) => setPlayer(i, { categoryId: e.target.value || null })}
+                    >
+                      <option value="">¿Qué es?</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
                     {hasPricing && p.firstName.trim() && (
-                      <span className="ml-auto text-sm font-medium">
+                      <span className="text-sm font-medium">
                         {(() => {
-                          const pr = playerPrice(p.isSocio, p.hasAbono, pricing);
+                          const pr = playerPrice(p.categoryId, categories, isWeekend);
                           return pr != null ? `$${pr.toLocaleString('es-AR')}` : '—';
                         })()}
                       </span>
                     )}
                   </div>
+                  )}
                 </div>
               ))}
-              {players.length < 12 && (
+              {!fixedPlayers && players.length < 12 && (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="w-full"
-                  onClick={() => setPlayers((ps) => [...ps, { firstName: '', lastName: '', isSocio: false, hasAbono: false }])}
+                  onClick={() => setPlayers((ps) => [...ps, { firstName: '', lastName: '', categoryId: null }])}
                 >
                   <Plus className="h-4 w-4" /> Agregar jugador
                 </Button>
@@ -498,7 +515,7 @@ export default function PortalPage() {
               book.isPending ||
               !firstName.trim() ||
               phone.trim().length < 5 ||
-              (askPlayers && validPlayers < 2)
+              (showPlayers && validPlayers < requiredPlayers)
             }
           >
             <CalendarCheck className="h-4 w-4" />

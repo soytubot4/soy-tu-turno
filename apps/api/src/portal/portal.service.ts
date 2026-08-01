@@ -55,7 +55,16 @@ export class PortalService {
       const services = await tx.service.findMany({
         where: { active: true, tenantId },
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-        select: { id: true, name: true, description: true, durationMin: true, price: true, priceUnit: true },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          durationMin: true,
+          price: true,
+          priceUnit: true,
+          askPeople: true,
+          peopleCount: true,
+        },
       });
       const resources = await tx.resource.findMany({
         // Canchas de alquiler activas + todas las referencias del mapa (bar,
@@ -80,7 +89,20 @@ export class PortalService {
       });
       const cfg0 = (tenant?.turnoConfig ?? {}) as Record<string, unknown>;
       const products = cfg0.productsEnabled === true ? await this.products.offerings(tx, tenantId) : [];
-      return { tenant, services, resources, products };
+      // Categorías de persona (cuánto paga cada una) para el selector del portal.
+      const cats = await tx.playerCategory.findMany({
+        where: { tenantId, active: true },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      });
+      const playerCategories = cats.map((c) => ({
+        id: c.id,
+        name: c.name,
+        price: c.price != null ? Number(c.price) : null,
+        priceWeekend: c.priceWeekend != null ? Number(c.priceWeekend) : null,
+        sortOrder: c.sortOrder,
+        active: c.active,
+      }));
+      return { tenant, services, resources, products, playerCategories };
     }, tenantId);
 
     // Ratings en una tx aparte y tolerante: si la tabla reviews aún no se creó,
@@ -110,19 +132,8 @@ export class PortalService {
       tenant: tenantPublic,
       canchas: cfg.canchas === true,
       askPlayers: cfg.askPlayers === true,
-      playerPricing: {
-        weekendEnabled: cfg.priceWeekendEnabled === true,
-        weekday: {
-          socioAbono: num(cfg.priceSocioAbono),
-          socioSinAbono: num(cfg.priceSocioSinAbono),
-          noSocio: num(cfg.priceNoSocio),
-        },
-        weekend: {
-          socioAbono: num(cfg.priceSocioAbonoWknd),
-          socioSinAbono: num(cfg.priceSocioSinAbonoWknd),
-          noSocio: num(cfg.priceNoSocioWknd),
-        },
-      },
+      weekendPricing: cfg.priceWeekendEnabled === true,
+      playerCategories: base.playerCategories,
       rating: business,
       services: base.services,
       products: base.products,
@@ -209,39 +220,31 @@ export class PortalService {
       if (clash) throw new ConflictException('Ese horario ya no está disponible');
 
       try {
-        // Precios por jugador (según socio + abono de tenis), tomados de la config.
+        // Precio de cada persona según su categoría (la configura el club).
         const tenant = await tx.tenant.findUnique({
           where: { id: tenantId },
           select: { turnoConfig: true },
         });
         const cfg = (tenant?.turnoConfig ?? {}) as Record<string, unknown>;
-        const num = (v: unknown) => (typeof v === 'number' ? v : null);
-        // Fin de semana (si está habilitado el precio diferenciado) → usa el set de finde.
+        // Fin de semana (si está habilitado el precio diferenciado) → precio de finde.
         const weekend = cfg.priceWeekendEnabled === true && isWeekendDate(input.date);
-        const pricing = weekend
-          ? {
-              socioAbono: num(cfg.priceSocioAbonoWknd),
-              socioSinAbono: num(cfg.priceSocioSinAbonoWknd),
-              noSocio: num(cfg.priceNoSocioWknd),
-            }
-          : {
-              socioAbono: num(cfg.priceSocioAbono),
-              socioSinAbono: num(cfg.priceSocioSinAbono),
-              noSocio: num(cfg.priceNoSocio),
-            };
+        const cats = (await tx.playerCategory.findMany({ where: { tenantId } })).map((c) => ({
+          id: c.id,
+          name: c.name,
+          price: c.price != null ? Number(c.price) : null,
+          priceWeekend: c.priceWeekend != null ? Number(c.priceWeekend) : null,
+        }));
+        // El turno guarda el nombre y el precio de la categoría, así que el
+        // histórico no cambia si después la renombran o la borran.
         const players = (input.players ?? [])
           .filter((p) => p.firstName?.trim())
-          .map((p) => {
-            const isSocio = !!p.isSocio;
-            const hasAbono = isSocio && !!p.hasAbono;
-            return {
-              firstName: p.firstName.trim(),
-              lastName: (p.lastName ?? '').trim(),
-              isSocio,
-              hasAbono,
-              price: playerPrice(isSocio, hasAbono, pricing),
-            };
-          });
+          .map((p) => ({
+            firstName: p.firstName.trim(),
+            lastName: (p.lastName ?? '').trim(),
+            categoryId: p.categoryId ?? null,
+            categoryName: cats.find((c) => c.id === p.categoryId)?.name ?? null,
+            price: playerPrice(p.categoryId, cats, weekend),
+          }));
         const playersTotal = players.reduce((sum, p) => sum + (p.price ?? 0), 0);
         const hasAnyPrice = players.some((p) => p.price != null);
 

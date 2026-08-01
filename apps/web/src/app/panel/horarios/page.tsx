@@ -14,6 +14,13 @@ import {
   deleteBlock,
 } from '@/features/horarios/api';
 import { getTurnoSettings, updateTurnoSettings } from '@/features/horarios/settings-api';
+import {
+  listPlayerCategories,
+  createPlayerCategory,
+  updatePlayerCategory,
+  deletePlayerCategory,
+  type PlayerCategory,
+} from '@/features/player-categories/api';
 import { useMe } from '@/features/me/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -72,7 +79,7 @@ export default function HorariosPage() {
 
       {canSettings && canchas && <PlayersToggleCard />}
 
-      {canSettings && canchas && <PlayerPricingCard />}
+      {canSettings && canchas && <PlayerCategoriesCard />}
 
       {canSchedule && (resources ?? []).length > 1 && (
         <div className="flex flex-wrap gap-2">
@@ -269,8 +276,8 @@ function PlayersToggleCard() {
       <CardHeader>
         <CardTitle>Datos de los jugadores</CardTitle>
         <CardDescription>
-          Si lo prendés, al reservar el cliente carga los jugadores/acompañantes (nombre, apellido y si
-          son socios). Se piden mínimo 2.
+          Si lo prendés, al reservar el cliente carga los jugadores/acompañantes: nombre, apellido y la
+          categoría de cada uno (las definís abajo). Se piden mínimo 2.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -293,68 +300,114 @@ function PlayersToggleCard() {
   );
 }
 
-/** Precios por jugador según su condición (socio + abono), con opción de precio de finde. */
-function PlayerPricingCard() {
-  const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
-  const [a, setA] = useState('');
-  const [b, setB] = useState('');
-  const [c, setC] = useState('');
-  const [wknd, setWknd] = useState(false);
-  const [aw, setAw] = useState('');
-  const [bw, setBw] = useState('');
-  const [cw, setCw] = useState('');
+/** Una fila editable del card de categorías. */
+type CatRow = { id: string | null; name: string; price: string; priceWeekend: string };
 
-  const asStr = (n: number | null) => (n != null ? String(n) : '');
+const asStr = (n: number | null | undefined) => (n != null ? String(n) : '');
+const toRows = (cats: PlayerCategory[]): CatRow[] =>
+  cats.map((c) => ({ id: c.id, name: c.name, price: asStr(c.price), priceWeekend: asStr(c.priceWeekend) }));
+
+/**
+ * Categorías de personas: la lista que arma el club (socio con abono, no socio,
+ * menor…) con cuánto paga cada una. Al reservar, cada persona elige la suya y el
+ * total del turno es la suma — por eso un mismo turno puede mezclar condiciones.
+ */
+function PlayerCategoriesCard() {
+  const qc = useQueryClient();
+  const { data: settings } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const { data: cats, isLoading } = useQuery({
+    queryKey: ['player-categories'],
+    queryFn: listPlayerCategories,
+  });
+
+  const [rows, setRows] = useState<CatRow[]>([]);
+  const [wknd, setWknd] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
   useEffect(() => {
-    if (data) {
-      setA(asStr(data.priceSocioAbono));
-      setB(asStr(data.priceSocioSinAbono));
-      setC(asStr(data.priceNoSocio));
-      setWknd(data.priceWeekendEnabled);
-      setAw(asStr(data.priceSocioAbonoWknd));
-      setBw(asStr(data.priceSocioSinAbonoWknd));
-      setCw(asStr(data.priceNoSocioWknd));
-    }
-  }, [data]);
+    if (cats) setRows(toRows(cats));
+  }, [cats]);
+  useEffect(() => {
+    if (settings) setWknd(settings.priceWeekendEnabled);
+  }, [settings]);
+
+  const setRow = (i: number, patch: Partial<CatRow>) =>
+    setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['player-categories'] });
+    qc.invalidateQueries({ queryKey: ['turno-settings'] });
+  };
 
   const save = useMutation({
-    mutationFn: () =>
-      updateTurnoSettings({
-        priceSocioAbono: a.trim() ? Number(a) : null,
-        priceSocioSinAbono: b.trim() ? Number(b) : null,
-        priceNoSocio: c.trim() ? Number(c) : null,
-        priceWeekendEnabled: wknd,
-        priceSocioAbonoWknd: aw.trim() ? Number(aw) : null,
-        priceSocioSinAbonoWknd: bw.trim() ? Number(bw) : null,
-        priceNoSocioWknd: cw.trim() ? Number(cw) : null,
-      }),
+    mutationFn: async () => {
+      const num = (s: string) => (s.trim() ? Number(s) : null);
+      if (settings && wknd !== settings.priceWeekendEnabled) {
+        await updateTurnoSettings({ priceWeekendEnabled: wknd });
+      }
+      const before = new Map((cats ?? []).map((c) => [c.id, c]));
+      for (const [i, r] of rows.entries()) {
+        const name = r.name.trim();
+        if (!name) continue;
+        const body = { name, price: num(r.price), priceWeekend: num(r.priceWeekend), sortOrder: i };
+        if (!r.id) {
+          await createPlayerCategory({ ...body, active: true });
+          continue;
+        }
+        const prev = before.get(r.id);
+        const changed =
+          !prev ||
+          prev.name !== name ||
+          prev.price !== body.price ||
+          prev.priceWeekend !== body.priceWeekend ||
+          prev.sortOrder !== i;
+        if (changed) await updatePlayerCategory(r.id, body);
+      }
+    },
     onSuccess: () => {
-      toast.success('Precios guardados');
-      qc.invalidateQueries({ queryKey: ['turno-settings'] });
+      toast.success('Categorías guardadas');
+      invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (!data?.askPlayers) return null;
+  const remove = useMutation({
+    mutationFn: (id: string) => deletePlayerCategory(id),
+    onSuccess: () => {
+      toast.success('Categoría eliminada');
+      setConfirmDelete(null);
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!settings?.askPlayers) return null;
 
   const norm = (s: string) => (s.trim() ? String(Number(s)) : '');
+  const saved = toRows(cats ?? []);
   const dirty =
-    norm(a) !== asStr(data.priceSocioAbono) ||
-    norm(b) !== asStr(data.priceSocioSinAbono) ||
-    norm(c) !== asStr(data.priceNoSocio) ||
-    wknd !== data.priceWeekendEnabled ||
-    norm(aw) !== asStr(data.priceSocioAbonoWknd) ||
-    norm(bw) !== asStr(data.priceSocioSinAbonoWknd) ||
-    norm(cw) !== asStr(data.priceNoSocioWknd);
+    wknd !== (settings?.priceWeekendEnabled ?? false) ||
+    rows.length !== saved.length ||
+    rows.some((r, i) => {
+      const s = saved[i];
+      return (
+        !s ||
+        s.id !== r.id ||
+        s.name !== r.name.trim() ||
+        norm(s.price) !== norm(r.price) ||
+        norm(s.priceWeekend) !== norm(r.priceWeekend)
+      );
+    });
+  const busy = save.isPending || remove.isPending;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Precios por jugador</CardTitle>
+        <CardTitle>Categorías de personas</CardTitle>
         <CardDescription>
-          Cuánto paga cada jugador según su condición. Se calcula solo en la reserva y se le muestra al
-          cliente. Dejá vacío el que no uses.
+          Cuánto paga cada persona según su condición. Al reservar, cada una elige su categoría y el
+          total es la suma — así un mismo turno puede tener socios y no socios juntos. Dejá el precio
+          vacío si esa categoría no paga.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -367,21 +420,101 @@ function PlayerPricingCard() {
           />
           El precio cambia los fines de semana (sábado y domingo)
         </label>
-        {wknd && (
-          <div className="flex items-center gap-3 text-xs text-[var(--color-muted-foreground)]">
-            <div className="flex-1" />
-            <div className="w-32 text-center">Entre semana</div>
-            <div className="w-32 text-center">Fin de semana</div>
-          </div>
+
+        {isLoading ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 text-xs text-[var(--color-muted-foreground)]">
+              <div className="flex-1">Categoría</div>
+              <div className="w-32 text-center">{wknd ? 'Entre semana' : 'Precio'}</div>
+              {wknd && <div className="w-32 text-center">Fin de semana</div>}
+              <div className="w-8" />
+            </div>
+            {rows.map((r, i) => (
+              <div key={r.id ?? `new-${i}`} className="flex items-center gap-3">
+                <Input
+                  value={r.name}
+                  onChange={(e) => setRow(i, { name: e.target.value })}
+                  placeholder="Ej: Socio con abono"
+                  className="flex-1"
+                />
+                <PriceCell value={r.price} onChange={(v) => setRow(i, { price: v })} />
+                {wknd && (
+                  <PriceCell value={r.priceWeekend} onChange={(v) => setRow(i, { priceWeekend: v })} />
+                )}
+                {confirmDelete === r.id ? (
+                  <div className="flex w-8 shrink-0 justify-center" />
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
+                    title="Eliminar"
+                    disabled={busy}
+                    onClick={() => {
+                      // Las nuevas todavía no existen en la base: se sacan de la lista.
+                      if (!r.id) setRows((rs) => rs.filter((_, idx) => idx !== i));
+                      else setConfirmDelete(r.id);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            ))}
+
+            {confirmDelete && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-[var(--color-destructive)]/40 bg-[var(--color-destructive)]/5 p-3">
+                <p className="text-sm">
+                  ¿Eliminar «{rows.find((r) => r.id === confirmDelete)?.name}»? Los turnos ya reservados
+                  mantienen lo que se cobró.
+                </p>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(null)} disabled={busy}>
+                    Cancelar
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-[var(--color-destructive)] text-white hover:bg-[var(--color-destructive)]/90"
+                    onClick={() => remove.mutate(confirmDelete)}
+                    disabled={busy}
+                  >
+                    Eliminar
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              disabled={busy}
+              onClick={() => setRows((rs) => [...rs, { id: null, name: '', price: '', priceWeekend: '' }])}
+            >
+              <Plus className="h-4 w-4" /> Agregar categoría
+            </Button>
+
+            <div className="flex justify-end gap-2">
+              {dirty && (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setRows(toRows(cats ?? []));
+                    setWknd(settings?.priceWeekendEnabled ?? false);
+                  }}
+                  disabled={busy}
+                >
+                  Revertir cambios
+                </Button>
+              )}
+              <Button onClick={() => save.mutate()} disabled={!dirty || busy}>
+                {save.isPending ? 'Guardando…' : 'Guardar'}
+              </Button>
+            </div>
+          </>
         )}
-        <PriceRow label="Socio con abono de tenis" value={a} onChange={setA} value2={wknd ? aw : undefined} onChange2={setAw} />
-        <PriceRow label="Socio sin abono de tenis" value={b} onChange={setB} value2={wknd ? bw : undefined} onChange2={setBw} />
-        <PriceRow label="No socio" value={c} onChange={setC} value2={wknd ? cw : undefined} onChange2={setCw} />
-        <div className="flex justify-end">
-          <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
-            {save.isPending ? 'Guardando…' : 'Guardar'}
-          </Button>
-        </div>
       </CardContent>
     </Card>
   );
@@ -389,33 +522,11 @@ function PlayerPricingCard() {
 
 function PriceCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <div className="relative w-32">
+    <div className="relative w-32 shrink-0">
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--color-muted-foreground)]">
         $
       </span>
       <PriceField value={value} onChange={onChange} className="pl-7" placeholder="—" />
-    </div>
-  );
-}
-
-function PriceRow({
-  label,
-  value,
-  onChange,
-  value2,
-  onChange2,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  value2?: string;
-  onChange2?: (v: string) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <Label className="flex-1 text-sm font-normal">{label}</Label>
-      <PriceCell value={value} onChange={onChange} />
-      {value2 !== undefined && onChange2 && <PriceCell value={value2} onChange={onChange2} />}
     </div>
   );
 }

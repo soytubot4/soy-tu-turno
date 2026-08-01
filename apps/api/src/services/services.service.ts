@@ -40,6 +40,8 @@ export class ServicesService {
           color: input.color || null,
           active: input.active,
           sortOrder: input.sortOrder,
+          askPeople: input.askPeople,
+          peopleCount: input.askPeople ? (input.peopleCount ?? null) : null,
         },
         select: { id: true },
       });
@@ -65,6 +67,13 @@ export class ServicesService {
           ...(input.color !== undefined ? { color: input.color || null } : {}),
           ...(input.active !== undefined ? { active: input.active } : {}),
           ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+          ...(input.askPeople !== undefined ? { askPeople: input.askPeople } : {}),
+          // Si apagan el pedido de personas, limpiamos la cantidad para no dejar basura.
+          ...(input.askPeople === false
+            ? { peopleCount: null }
+            : input.peopleCount !== undefined
+              ? { peopleCount: input.peopleCount ?? null }
+              : {}),
         },
         select: { id: true },
       });

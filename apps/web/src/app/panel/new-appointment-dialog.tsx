@@ -8,6 +8,7 @@ import { playerPrice, isWeekendDate } from '@soytuturno/shared';
 import { listServices } from '@/features/servicios/api';
 import { listResources } from '@/features/equipo/api';
 import { getTurnoSettings } from '@/features/horarios/settings-api';
+import { listPlayerCategories } from '@/features/player-categories/api';
 import {
   getAvailability,
   searchCustomers,
@@ -69,25 +70,33 @@ export function NewAppointmentDialog({
   const [slot, setSlot] = useState<{ startAt: string; resourceId: string } | null>(null);
   const [customer, setCustomer] = useState<CustomerLite | null>(null);
   const [players, setPlayers] = useState<
-    { firstName: string; lastName: string; isSocio: boolean; hasAbono: boolean }[]
+    { firstName: string; lastName: string; categoryId: string | null }[]
   >([
-    { firstName: '', lastName: '', isSocio: false, hasAbono: false },
-    { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+    { firstName: '', lastName: '', categoryId: null },
+    { firstName: '', lastName: '', categoryId: null },
   ]);
 
   const { data: settings } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings, enabled: open });
+  const { data: cats } = useQuery({
+    queryKey: ['player-categories'],
+    queryFn: listPlayerCategories,
+    enabled: open,
+  });
   const askPlayers = !!settings?.askPlayers;
   const isWeekend = !!settings?.priceWeekendEnabled && isWeekendDate(date);
-  const pricing = {
-    socioAbono: (isWeekend ? settings?.priceSocioAbonoWknd : settings?.priceSocioAbono) ?? null,
-    socioSinAbono: (isWeekend ? settings?.priceSocioSinAbonoWknd : settings?.priceSocioSinAbono) ?? null,
-    noSocio: (isWeekend ? settings?.priceNoSocioWknd : settings?.priceNoSocio) ?? null,
-  };
-  const hasPricing = pricing.socioAbono != null || pricing.socioSinAbono != null || pricing.noSocio != null;
+  const categories = (cats ?? []).filter((c) => c.active);
+  const hasPricing = categories.some((c) => c.price != null || c.priceWeekend != null);
+  // El servicio puede pedir los datos de las personas con una cantidad fija
+  // (ej: singles = 2, dobles = 4). Si no, cae al modo del comercio (mínimo 2).
+  const service = (services ?? []).find((s) => s.id === serviceId);
+  const serviceAskPeople = !!service?.askPeople;
+  const showPlayers = serviceAskPeople || askPlayers;
+  const requiredPlayers = serviceAskPeople ? (service?.peopleCount ?? 2) : 2;
+  const fixedPlayers = serviceAskPeople && service?.peopleCount != null;
   const validPlayers = players.filter((p) => p.firstName.trim()).length;
   const playersTotal = players
     .filter((p) => p.firstName.trim())
-    .reduce((sum, p) => sum + (playerPrice(p.isSocio, p.hasAbono, pricing) ?? 0), 0);
+    .reduce((sum, p) => sum + (playerPrice(p.categoryId, categories, isWeekend) ?? 0), 0);
   const setPlayer = (i: number, patch: Partial<(typeof players)[number]>) =>
     setPlayers((ps) => ps.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
 
@@ -100,8 +109,8 @@ export function NewAppointmentDialog({
       setSlot(null);
       setCustomer(null);
       setPlayers([
-        { firstName: '', lastName: '', isSocio: false, hasAbono: false },
-        { firstName: '', lastName: '', isSocio: false, hasAbono: false },
+        { firstName: '', lastName: '', categoryId: null },
+        { firstName: '', lastName: '', categoryId: null },
       ]);
     }
   }, [open, defaultDate]);
@@ -110,6 +119,19 @@ export function NewAppointmentDialog({
   useEffect(() => {
     setSlot(null);
   }, [serviceId, resourceId, date]);
+
+  // Si el servicio pide una cantidad fija, dejamos exactamente esa cantidad de filas.
+  useEffect(() => {
+    if (!fixedPlayers) return;
+    setPlayers((ps) => {
+      if (ps.length === requiredPlayers) return ps;
+      const next = ps.slice(0, requiredPlayers);
+      while (next.length < requiredPlayers) {
+        next.push({ firstName: '', lastName: '', categoryId: null });
+      }
+      return next;
+    });
+  }, [fixedPlayers, requiredPlayers]);
 
   const activeServices = (services ?? []).filter((s) => s.active);
   const activeResources = (resources ?? []).filter((r) => r.active);
@@ -159,14 +181,13 @@ export function NewAppointmentDialog({
         resourceId: slot!.resourceId,
         serviceId,
         startAt: slot!.startAt,
-        players: askPlayers
+        players: showPlayers
           ? players
               .filter((p) => p.firstName.trim())
               .map((p) => ({
                 firstName: p.firstName.trim(),
                 lastName: p.lastName.trim(),
-                isSocio: p.isSocio,
-                hasAbono: p.isSocio && p.hasAbono,
+                categoryId: p.categoryId,
               }))
           : undefined,
       }),
@@ -179,7 +200,11 @@ export function NewAppointmentDialog({
   });
 
   const canSubmit =
-    !!serviceId && !!slot && !!customer && !create.isPending && (!askPlayers || validPlayers >= 2);
+    !!serviceId &&
+    !!slot &&
+    !!customer &&
+    !create.isPending &&
+    (!showPlayers || validPlayers >= requiredPlayers);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -259,9 +284,9 @@ export function NewAppointmentDialog({
 
           <CustomerPicker value={customer} onChange={setCustomer} />
 
-          {askPlayers && (
+          {showPlayers && (
             <div className="space-y-2">
-              <Label>Jugadores (mínimo 2)</Label>
+              <Label>{fixedPlayers ? `Jugadores (${requiredPlayers})` : 'Jugadores (mínimo 2)'}</Label>
               {players.map((p, i) => (
                 <div key={i} className="space-y-2 rounded-[var(--radius)] border border-[var(--color-border)] p-2.5">
                   <div className="flex items-center gap-2">
@@ -272,13 +297,17 @@ export function NewAppointmentDialog({
                       placeholder="Nombre"
                       className="flex-1"
                     />
-                    <Input
-                      value={p.lastName}
-                      onChange={(e) => setPlayer(i, { lastName: e.target.value })}
-                      placeholder="Apellido"
-                      className="flex-1"
-                    />
-                    {players.length > 2 && (
+                    {/* Apellido + socio/abono son del modo club; si el servicio solo pide
+                        las personas, alcanza con el nombre. */}
+                    {askPlayers && (
+                      <Input
+                        value={p.lastName}
+                        onChange={(e) => setPlayer(i, { lastName: e.target.value })}
+                        placeholder="Apellido"
+                        className="flex-1"
+                      />
+                    )}
+                    {!fixedPlayers && players.length > 2 && (
                       <button
                         type="button"
                         onClick={() => setPlayers((ps) => ps.filter((_, idx) => idx !== i))}
@@ -289,45 +318,39 @@ export function NewAppointmentDialog({
                       </button>
                     )}
                   </div>
-                  <div className="ml-6 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                    <label className="flex cursor-pointer items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={p.isSocio}
-                        onChange={(e) => setPlayer(i, { isSocio: e.target.checked, hasAbono: e.target.checked && p.hasAbono })}
-                        className="h-4 w-4 accent-[var(--color-primary)]"
-                      />
-                      Socio
-                    </label>
-                    {p.isSocio && (
-                      <label className="flex cursor-pointer items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={p.hasAbono}
-                          onChange={(e) => setPlayer(i, { hasAbono: e.target.checked })}
-                          className="h-4 w-4 accent-[var(--color-primary)]"
-                        />
-                        Abono de tenis
-                      </label>
-                    )}
+                  {askPlayers && categories.length > 0 && (
+                  <div className="ml-6 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <select
+                      className={`${selectCls} flex-1`}
+                      value={p.categoryId ?? ''}
+                      onChange={(e) => setPlayer(i, { categoryId: e.target.value || null })}
+                    >
+                      <option value="">¿Qué es?</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
                     {hasPricing && p.firstName.trim() && (
-                      <span className="ml-auto text-sm font-medium">
+                      <span className="text-sm font-medium">
                         {(() => {
-                          const pr = playerPrice(p.isSocio, p.hasAbono, pricing);
+                          const pr = playerPrice(p.categoryId, categories, isWeekend);
                           return pr != null ? `$${pr.toLocaleString('es-AR')}` : '—';
                         })()}
                       </span>
                     )}
                   </div>
+                  )}
                 </div>
               ))}
-              {players.length < 12 && (
+              {!fixedPlayers && players.length < 12 && (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="w-full"
-                  onClick={() => setPlayers((ps) => [...ps, { firstName: '', lastName: '', isSocio: false, hasAbono: false }])}
+                  onClick={() => setPlayers((ps) => [...ps, { firstName: '', lastName: '', categoryId: null }])}
                 >
                   <Plus className="h-4 w-4" /> Agregar jugador
                 </Button>

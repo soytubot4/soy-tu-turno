@@ -113,10 +113,11 @@ model Tenant {
   customers    Customer[]
   adminUsers   AdminUser[]
   // turnos
-  services     Service[]
-  resources    Resource[]
-  appointments Appointment[]
-  reviews      Review[]
+  services         Service[]
+  resources        Resource[]
+  appointments     Appointment[]
+  reviews          Review[]
+  playerCategories PlayerCategory[]
 
   @@map("tenants")
 }
@@ -200,6 +201,26 @@ model Customer {
 // ─────────────────────────────────────────────────────────────
 
 /// Servicio ofrecido (corte, consulta, etc.). Duración fija en minutos.
+/// Categoría de persona que define cuánto paga cada una (ej: socio con abono,
+/// socio sin abono, no socio, menor, invitado). La define cada club.
+model PlayerCategory {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  name         String
+  /// Null = sin precio configurado (no suma). Para "no paga" usar 0.
+  price        Decimal? @db.Decimal(14, 2)
+  priceWeekend Decimal? @map("price_weekend") @db.Decimal(14, 2)
+  sortOrder    Int      @default(0) @map("sort_order")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("player_categories")
+}
+
 model Service {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
@@ -211,6 +232,9 @@ model Service {
   color       String? // color del chip en el calendario
   active      Boolean  @default(true)
   sortOrder   Int      @default(0) @map("sort_order")
+  // Pedir los datos de las personas al reservar (ej. singles=2, dobles=4). Solo nombre.
+  askPeople   Boolean  @default(false) @map("ask_people")
+  peopleCount Int?     @map("people_count")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 

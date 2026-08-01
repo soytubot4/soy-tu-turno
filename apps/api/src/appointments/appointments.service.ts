@@ -97,7 +97,6 @@ export class AppointmentsService {
         select: { turnoConfig: true },
       });
       const cfg = (tenant?.turnoConfig ?? {}) as Record<string, unknown>;
-      const num = (v: unknown) => (typeof v === 'number' ? v : null);
       const tz = typeof cfg.timezone === 'string' ? cfg.timezone : 'America/Argentina/Buenos_Aires';
       const localDate = new Intl.DateTimeFormat('en-CA', {
         timeZone: tz,
@@ -106,30 +105,23 @@ export class AppointmentsService {
         day: '2-digit',
       }).format(startAt);
       const weekend = cfg.priceWeekendEnabled === true && isWeekendDate(localDate);
-      const pricing = weekend
-        ? {
-            socioAbono: num(cfg.priceSocioAbonoWknd),
-            socioSinAbono: num(cfg.priceSocioSinAbonoWknd),
-            noSocio: num(cfg.priceNoSocioWknd),
-          }
-        : {
-            socioAbono: num(cfg.priceSocioAbono),
-            socioSinAbono: num(cfg.priceSocioSinAbono),
-            noSocio: num(cfg.priceNoSocio),
-          };
+      const cats = (await tx.playerCategory.findMany({ where: { tenantId: ctx.tenantId } })).map((c) => ({
+        id: c.id,
+        name: c.name,
+        price: c.price != null ? Number(c.price) : null,
+        priceWeekend: c.priceWeekend != null ? Number(c.priceWeekend) : null,
+      }));
+      // El turno guarda el nombre y el precio de la categoría, así que el
+      // histórico no cambia si después la renombran o la borran.
       const players = (input.players ?? [])
         .filter((p) => p.firstName?.trim())
-        .map((p) => {
-          const isSocio = !!p.isSocio;
-          const hasAbono = isSocio && !!p.hasAbono;
-          return {
-            firstName: p.firstName.trim(),
-            lastName: (p.lastName ?? '').trim(),
-            isSocio,
-            hasAbono,
-            price: playerPrice(isSocio, hasAbono, pricing),
-          };
-        });
+        .map((p) => ({
+          firstName: p.firstName.trim(),
+          lastName: (p.lastName ?? '').trim(),
+          categoryId: p.categoryId ?? null,
+          categoryName: cats.find((c) => c.id === p.categoryId)?.name ?? null,
+          price: playerPrice(p.categoryId, cats, weekend),
+        }));
       const playersTotal = players.reduce((sum, p) => sum + (p.price ?? 0), 0);
       const hasAnyPrice = players.some((p) => p.price != null);
 

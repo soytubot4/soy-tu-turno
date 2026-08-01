@@ -205,6 +205,9 @@ export const createServiceSchema = z.object({
   color: z.string().max(20).optional(),
   active: z.boolean().default(true),
   sortOrder: z.coerce.number().int().default(0),
+  // Si el servicio pide los datos de las personas al reservar (ej: singles = 2, dobles = 4).
+  askPeople: z.boolean().default(false),
+  peopleCount: z.coerce.number().int().min(1).max(12).nullable().optional(),
   // Qué recursos ofrecen el servicio (vacío = todos).
   resourceIds: z.array(z.string().uuid()).default([]),
 });
@@ -338,22 +341,51 @@ export type CreateScheduleBlockInput = z.infer<typeof createScheduleBlockSchema>
 export const playerSchema = z.object({
   firstName: z.string().trim().min(1, 'Poné el nombre').max(120),
   lastName: z.string().trim().max(120).optional().default(''),
-  isSocio: z.boolean().default(false),
-  hasAbono: z.boolean().default(false), // abono de tenis (solo aplica si es socio)
+  // Categoría que define cuánto paga (la configura el club). Null = sin categoría.
+  categoryId: z.string().uuid().nullable().optional(),
 });
 export type Player = z.infer<typeof playerSchema>;
 
 /**
- * Precio que paga un jugador según su condición (socio del club + abono de tenis).
- * Devuelve null si no está configurado ese precio.
+ * Categoría de persona: cuánto paga cada una según su condición. La lista la
+ * arma cada club (socio con abono, socio sin abono, no socio, menor, invitado…).
+ */
+export const createPlayerCategorySchema = z.object({
+  name: z.string().trim().min(1, 'Poné un nombre').max(120),
+  // Null = sin precio configurado (no suma). Para "no paga" usar 0.
+  price: z.coerce.number().nonnegative().nullable().optional(),
+  priceWeekend: z.coerce.number().nonnegative().nullable().optional(),
+  sortOrder: z.coerce.number().int().default(0),
+  active: z.boolean().default(true),
+});
+export const updatePlayerCategorySchema = createPlayerCategorySchema.partial();
+export type CreatePlayerCategoryInput = z.infer<typeof createPlayerCategorySchema>;
+export type UpdatePlayerCategoryInput = z.infer<typeof updatePlayerCategorySchema>;
+
+/** Una categoría tal como la ve el front (precios ya resueltos a number). */
+export type PlayerCategoryDto = {
+  id: string;
+  name: string;
+  price: number | null;
+  priceWeekend: number | null;
+  sortOrder: number;
+  active: boolean;
+};
+
+/**
+ * Precio que paga una persona según su categoría y si el turno cae fin de semana.
+ * Devuelve null si no está configurado ese precio (no suma al total).
  */
 export function playerPrice(
-  isSocio: boolean,
-  hasAbono: boolean,
-  pricing: { socioAbono: number | null; socioSinAbono: number | null; noSocio: number | null },
+  categoryId: string | null | undefined,
+  categories: Pick<PlayerCategoryDto, 'id' | 'price' | 'priceWeekend'>[],
+  weekend: boolean,
 ): number | null {
-  if (!isSocio) return pricing.noSocio;
-  return hasAbono ? pricing.socioAbono : pricing.socioSinAbono;
+  if (!categoryId) return null;
+  const cat = categories.find((c) => c.id === categoryId);
+  if (!cat) return null;
+  // Si el finde no tiene precio propio, cae al de entre semana.
+  return weekend ? (cat.priceWeekend ?? cat.price) : cat.price;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -463,21 +495,14 @@ export const updateTurnoSettingsSchema = z.object({
   slotStepMin: z.coerce.number().int().min(5).max(240).optional(),
   // Anticipación mínima para reservar (minutos desde ahora).
   minLeadMinutes: z.coerce.number().int().min(0).max(10080).optional(),
-  // Pedir datos de los jugadores/acompañantes al reservar (nombre, apellido, socio).
+  // Pedir los datos de las personas al reservar, con su categoría (modo club).
   askPlayers: z.boolean().optional(),
   // Habilitar productos propios (el comercio los ofrece para reservar con el turno).
   productsEnabled: z.boolean().optional(),
   // Aparecer en el directorio público (landing de soytuturno.com).
   listedOnLanding: z.boolean().optional(),
-  // Precios por jugador según su condición (para clubes que cobran por jugador).
-  priceSocioAbono: z.coerce.number().nonnegative().nullable().optional(),
-  priceSocioSinAbono: z.coerce.number().nonnegative().nullable().optional(),
-  priceNoSocio: z.coerce.number().nonnegative().nullable().optional(),
-  // Precios diferenciados de fin de semana (sábado/domingo).
+  // Precios diferenciados de fin de semana (sábado/domingo) en las categorías.
   priceWeekendEnabled: z.boolean().optional(),
-  priceSocioAbonoWknd: z.coerce.number().nonnegative().nullable().optional(),
-  priceSocioSinAbonoWknd: z.coerce.number().nonnegative().nullable().optional(),
-  priceNoSocioWknd: z.coerce.number().nonnegative().nullable().optional(),
 });
 
 /** ¿La fecha YYYY-MM-DD cae sábado o domingo? (día local). */

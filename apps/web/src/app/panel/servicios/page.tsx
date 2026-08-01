@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Trash2, Clock, Pencil } from 'lucide-react';
+import { Plus, Trash2, Clock, Pencil, Users } from 'lucide-react';
 import { PRICE_UNITS, PRICE_UNIT_LABELS, type PriceUnit } from '@soytuturno/shared';
 import { listServices, createService, deleteService, updateService, type Service } from '@/features/servicios/api';
 import { useMe } from '@/features/me/api';
@@ -33,6 +33,8 @@ export default function ServiciosPage() {
   const [durationMin, setDurationMin] = useState('');
   const [price, setPrice] = useState('');
   const [priceUnit, setPriceUnit] = useState<PriceUnit | ''>('');
+  const [askPeople, setAskPeople] = useState(false);
+  const [peopleCount, setPeopleCount] = useState('2');
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['services'] });
 
@@ -45,6 +47,8 @@ export default function ServiciosPage() {
         priceUnit: priceUnit || null,
         active: true,
         sortOrder: 0,
+        askPeople,
+        peopleCount: askPeople ? Number(peopleCount) : null,
         resourceIds: [],
       }),
     onSuccess: () => {
@@ -53,6 +57,8 @@ export default function ServiciosPage() {
       setDurationMin('');
       setPrice('');
       setPriceUnit('');
+      setAskPeople(false);
+      setPeopleCount('2');
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -86,8 +92,8 @@ export default function ServiciosPage() {
 
       {canWrite && (
       <Card>
-        <CardContent className="pt-5">
-          <div className={`grid gap-3 sm:items-end ${canchas ? 'sm:grid-cols-[1fr_auto_auto_auto_auto]' : 'sm:grid-cols-[1fr_auto_auto_auto]'}`}>
+        <CardContent className="space-y-3 pt-5">
+          <div className={`grid gap-3 sm:items-end ${canchas ? 'sm:grid-cols-[1fr_auto_auto_auto]' : 'sm:grid-cols-[1fr_auto_auto]'}`}>
             <div className="flex flex-col gap-1.5">
               <Label>Nombre</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Corte de pelo" />
@@ -128,10 +134,41 @@ export default function ServiciosPage() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Datos de las personas: ej. singles = 2, dobles = 4. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[var(--color-border)] pt-3">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={askPeople}
+                onChange={(e) => setAskPeople(e.target.checked)}
+                className="h-4 w-4 accent-[var(--color-primary)]"
+              />
+              Pedir los datos de las personas
+            </label>
+            {askPeople && (
+              <div className="flex items-center gap-2">
+                <Label className="text-sm font-normal">¿Cuántas?</Label>
+                <Input
+                  type="number"
+                  value={peopleCount}
+                  onChange={(e) => setPeopleCount(e.target.value)}
+                  className="w-20"
+                  min={1}
+                  max={12}
+                />
+              </div>
+            )}
             <Button
-              className="w-full sm:w-auto"
+              className="w-full sm:ml-auto sm:w-auto"
               onClick={() => create.mutate()}
-              disabled={create.isPending || !name.trim() || Number(durationMin) < 5}
+              disabled={
+                create.isPending ||
+                !name.trim() ||
+                Number(durationMin) < 5 ||
+                (askPeople && (Number(peopleCount) < 1 || Number(peopleCount) > 12))
+              }
             >
               <Plus className="h-4 w-4" /> Agregar
             </Button>
@@ -188,6 +225,8 @@ function ServiceRow({
   const [durationMin, setDurationMin] = useState(String(service.durationMin));
   const [price, setPrice] = useState(service.price != null ? String(service.price) : '');
   const [priceUnit, setPriceUnit] = useState<PriceUnit | ''>(service.priceUnit ?? '');
+  const [askPeople, setAskPeople] = useState(service.askPeople);
+  const [peopleCount, setPeopleCount] = useState(String(service.peopleCount ?? 2));
 
   const save = useMutation({
     mutationFn: () =>
@@ -196,6 +235,8 @@ function ServiceRow({
         durationMin: Number(durationMin),
         price: price.trim() ? Number(price) : null,
         priceUnit: priceUnit || null,
+        askPeople,
+        peopleCount: askPeople ? Number(peopleCount) : null,
       }),
     onSuccess: () => {
       toast.success('Servicio actualizado');
@@ -210,6 +251,8 @@ function ServiceRow({
     setDurationMin(String(service.durationMin));
     setPrice(service.price != null ? String(service.price) : '');
     setPriceUnit(service.priceUnit ?? '');
+    setAskPeople(service.askPeople);
+    setPeopleCount(String(service.peopleCount ?? 2));
     setEditing(true);
   }
 
@@ -243,8 +286,42 @@ function ServiceRow({
             </div>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:w-full">
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={askPeople}
+              onChange={(e) => setAskPeople(e.target.checked)}
+              className="h-4 w-4 accent-[var(--color-primary)]"
+            />
+            Pedir los datos de las personas
+          </label>
+          {askPeople && (
+            <div className="flex items-center gap-2">
+              <Label className="text-sm font-normal">¿Cuántas?</Label>
+              <Input
+                type="number"
+                value={peopleCount}
+                onChange={(e) => setPeopleCount(e.target.value)}
+                className="w-20"
+                min={1}
+                max={12}
+              />
+            </div>
+          )}
+        </div>
         <div className="flex gap-2">
-          <Button className="flex-1 sm:flex-none" size="sm" onClick={() => save.mutate()} disabled={save.isPending || !name.trim() || Number(durationMin) < 5}>
+          <Button
+            className="flex-1 sm:flex-none"
+            size="sm"
+            onClick={() => save.mutate()}
+            disabled={
+              save.isPending ||
+              !name.trim() ||
+              Number(durationMin) < 5 ||
+              (askPeople && (Number(peopleCount) < 1 || Number(peopleCount) > 12))
+            }
+          >
             Guardar
           </Button>
           <Button className="flex-1 sm:flex-none" size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={save.isPending}>
@@ -262,6 +339,11 @@ function ServiceRow({
         <p className="flex items-center gap-2 text-xs text-[var(--color-muted-foreground)]">
           <Clock className="h-3 w-3" /> {service.durationMin} min
           {service.price != null && <span>· {priceLabel(service.price, service.priceUnit)}</span>}
+          {service.askPeople && (
+            <span className="flex items-center gap-1">
+              · <Users className="h-3 w-3" /> {service.peopleCount ?? 2} personas
+            </span>
+          )}
         </p>
       </div>
       {canWrite && (

@@ -2,7 +2,13 @@
 
 import { apiFetch } from '@/lib/api';
 import { currentTenantSlug } from '@/lib/current-tenant';
-import type { PortalBookInput, PortalReviewInput, Sport, PriceUnit } from '@soytuturno/shared';
+import type {
+  PortalBookInput,
+  PortalReviewInput,
+  Sport,
+  PriceUnit,
+  PlayerCategoryDto,
+} from '@soytuturno/shared';
 
 const slug = () => currentTenantSlug();
 
@@ -38,12 +44,10 @@ export type PortalInfo = {
   canchas: boolean;
   /** Pedir datos de los jugadores/acompañantes al reservar. */
   askPlayers: boolean;
-  /** Precios por jugador según condición (socio + abono), con set de finde opcional. */
-  playerPricing: {
-    weekendEnabled: boolean;
-    weekday: { socioAbono: number | null; socioSinAbono: number | null; noSocio: number | null };
-    weekend: { socioAbono: number | null; socioSinAbono: number | null; noSocio: number | null };
-  };
+  /** Si los precios de las categorías cambian sábado y domingo. */
+  weekendPricing: boolean;
+  /** Categorías de persona activas: cuánto paga cada una. */
+  playerCategories: PlayerCategoryDto[];
   rating: Rating;
   services: {
     id: string;
@@ -52,6 +56,10 @@ export type PortalInfo = {
     durationMin: number;
     price: string | null;
     priceUnit: PriceUnit | null;
+    /** Si este servicio pide los datos de las personas al reservar. */
+    askPeople: boolean;
+    /** Cuántas personas pide (fijo). Null = sin tope definido. */
+    peopleCount: number | null;
   }[];
   /** Productos (variantes) que se pueden reservar junto al turno. */
   products: {

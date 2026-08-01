@@ -16,6 +16,10 @@ export type Service = {
   color: string | null;
   active: boolean;
   sortOrder: number;
+  /** Si al reservar hay que cargar los datos de las personas. */
+  askPeople: boolean;
+  /** Cuántas personas se piden (fijo: singles 2, dobles 4, etc.). */
+  peopleCount: number | null;
   resourceIds: string[];
 };
 

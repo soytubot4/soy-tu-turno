@@ -7,6 +7,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { HealthModule } from './health/health.module';
 import { ServicesModule } from './services/services.module';
+import { PlayerCategoriesModule } from './player-categories/player-categories.module';
 import { ProductsModule } from './products/products.module';
 import { ResourcesModule } from './resources/resources.module';
 import { BlocksModule } from './blocks/blocks.module';
@@ -26,6 +27,7 @@ import { TeamModule } from './team/team.module';
     AuthModule,
     HealthModule,
     ServicesModule,
+    PlayerCategoriesModule,
     ProductsModule,
     ResourcesModule,
     BlocksModule,

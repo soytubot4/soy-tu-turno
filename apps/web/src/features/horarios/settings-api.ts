@@ -12,13 +12,8 @@ export type TurnoSettings = {
   askPlayers: boolean;
   productsEnabled: boolean;
   listedOnLanding: boolean;
-  priceSocioAbono: number | null;
-  priceSocioSinAbono: number | null;
-  priceNoSocio: number | null;
+  /** Si los precios de las categorías cambian los fines de semana. */
   priceWeekendEnabled: boolean;
-  priceSocioAbonoWknd: number | null;
-  priceSocioSinAbonoWknd: number | null;
-  priceNoSocioWknd: number | null;
 };
 
 export const getTurnoSettings = () => apiFetch<TurnoSettings>('/settings', { tenantSlug: slug() });
