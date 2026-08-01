@@ -64,6 +64,9 @@ export class PortalService {
           priceUnit: true,
           askPeople: true,
           peopleCount: true,
+          // Quiénes lo ofrecen (vacío = todos). El portal filtra con esto la
+          // lista de profesionales, igual que el cálculo de disponibilidad.
+          resources: { select: { resourceId: true } },
         },
       });
       const resources = await tx.resource.findMany({
@@ -102,7 +105,12 @@ export class PortalService {
         sortOrder: c.sortOrder,
         active: c.active,
       }));
-      return { tenant, services, resources, products, playerCategories };
+      // Aplanamos los links → ids de los recursos que ofrecen cada servicio.
+      const servicesOut = services.map(({ resources: links, ...s }) => ({
+        ...s,
+        resourceIds: links.map((l) => l.resourceId),
+      }));
+      return { tenant, services: servicesOut, resources, products, playerCategories };
     }, tenantId);
 
     // Ratings en una tx aparte y tolerante: si la tabla reviews aún no se creó,

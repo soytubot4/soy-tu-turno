@@ -272,6 +272,9 @@ export const createResourceSchema = z.object({
   active: z.boolean().default(true),
   sortOrder: z.coerce.number().int().default(0),
   userId: z.string().uuid().nullable().optional(),
+  // Qué servicios ofrece (vacío = todos). Es el mismo vínculo que `resourceIds`
+  // del servicio, visto desde el otro lado.
+  serviceIds: z.array(z.string().uuid()).optional(),
   // Modo canchas:
   sport: z.enum(SPORTS).nullable().optional(),
   surface: z.string().trim().max(60).nullable().optional(),

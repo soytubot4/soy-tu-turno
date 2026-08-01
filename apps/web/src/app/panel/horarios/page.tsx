@@ -5,7 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, CalendarOff } from 'lucide-react';
 import { DAY_LABELS, SLOT_STEP_OPTIONS, type HourRange } from '@soytuturno/shared';
-import { listResources } from '@/features/equipo/api';
+import { listResources, updateResource } from '@/features/equipo/api';
+import { listServices } from '@/features/servicios/api';
 import {
   getSchedule,
   setSchedule,
@@ -94,6 +95,11 @@ export default function HorariosPage() {
             </Button>
           ))}
         </div>
+      )}
+
+      {/* Qué hace esta persona. En modo canchas no aplica: las canchas no "hacen" servicios. */}
+      {canSchedule && resourceId && !canchas && (
+        <ResourceServicesCard key={`svc-${resourceId}`} resourceId={resourceId} canEdit={canSettings} />
       )}
 
       {canSchedule &&
@@ -531,6 +537,89 @@ function PriceCell({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
+/**
+ * Qué servicios ofrece la persona seleccionada. Es el mismo vínculo que se edita
+ * desde Equipo, visto desde acá (donde ya elegiste de quién es el horario).
+ * Sin ninguno tildado hace todos: es el comportamiento por defecto.
+ */
+function ResourceServicesCard({ resourceId, canEdit }: { resourceId: string; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: resources } = useQuery({ queryKey: ['resources'], queryFn: listResources });
+  const { data: services } = useQuery({ queryKey: ['services'], queryFn: listServices });
+  const resource = (resources ?? []).find((r) => r.id === resourceId);
+  const activeServices = (services ?? []).filter((s) => s.active);
+
+  const [ids, setIds] = useState<string[] | null>(null);
+  useEffect(() => setIds(null), [resourceId]);
+  const current = ids ?? resource?.serviceIds ?? [];
+  const saved = resource?.serviceIds ?? [];
+  const dirty =
+    current.length !== saved.length || current.some((id) => !saved.includes(id));
+
+  const save = useMutation({
+    mutationFn: () => updateResource(resourceId, { serviceIds: current }),
+    onSuccess: () => {
+      toast.success('Servicios actualizados');
+      qc.invalidateQueries({ queryKey: ['resources'] });
+      setIds(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!resource || activeServices.length === 0) return null;
+
+  const toggle = (id: string) =>
+    setIds(current.includes(id) ? current.filter((x) => x !== id) : [...current, id]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Servicios que hace {resource.name}</CardTitle>
+        <CardDescription>
+          Solo aparece en el portal para los servicios tildados. Mientras nadie tilde un servicio,
+          lo hacen todos; apenas alguien lo tilda, pasa a hacerlo solo quien lo tenga marcado.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {activeServices.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              disabled={!canEdit || save.isPending}
+              onClick={() => toggle(s.id)}
+              className={`rounded-[var(--radius)] border px-3 py-1.5 text-sm transition-colors ${
+                current.includes(s.id)
+                  ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 font-medium'
+                  : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/50'
+              }`}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+        {current.length === 0 && (
+          <p className="text-xs text-[var(--color-muted-foreground)]">
+            Sin nada tildado: hace todos los servicios que nadie más se haya asignado.
+          </p>
+        )}
+        {canEdit && (
+          <div className="flex justify-end gap-2">
+            {dirty && (
+              <Button variant="ghost" onClick={() => setIds(null)} disabled={save.isPending}>
+                Revertir cambios
+              </Button>
+            )}
+            <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
+              {save.isPending ? 'Guardando…' : 'Guardar'}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function WeeklyEditor({ resourceId, courts }: { resourceId: string; courts: { id: string; name: string }[] }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
@@ -625,7 +714,9 @@ function WeeklyEditor({ resourceId, courts }: { resourceId: string; courts: { id
               <div className="w-24 shrink-0 pt-2 text-sm font-medium">{DAY_LABELS[day]}</div>
               <div className="flex-1 space-y-2">
                 {ranges.length === 0 ? (
-                  <span className="text-sm text-[var(--color-muted-foreground)]">Cerrado</span>
+                  // block: si fuera inline, el space-y del contenedor no lo separaría
+                  // del botón de abajo y se le montaría encima.
+                  <p className="pt-1.5 text-sm text-[var(--color-muted-foreground)]">Cerrado</p>
                 ) : (
                   ranges.map((r, idx) => (
                     <div key={idx} className="flex items-center gap-2">

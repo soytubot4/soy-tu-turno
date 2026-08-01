@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CalendarCheck, Clock, ChevronLeft, ChevronRight, CheckCircle2, MapPin, Plus, X } from 'lucide-react';
+import { CalendarCheck, Clock, ChevronLeft, ChevronRight, CheckCircle2, MapPin, Plus, Users, X } from 'lucide-react';
 import { SPORT_LABELS, PRICE_UNIT_LABELS, playerPrice, isWeekendDate, type Sport } from '@soytuturno/shared';
 import {
   getPortalInfo,
@@ -51,6 +51,7 @@ export default function PortalPage() {
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [slot, setSlot] = useState<{ startAt: string; resourceId: string } | null>(null);
   const [court, setCourt] = useState<string | null>(null); // cancha elegida (modo club)
+  const [staff, setStaff] = useState<string | null>(null); // profesional elegido (null = cualquiera)
   const [firstName, setFirstName] = useState('');
   const [phone, setPhone] = useState('');
   const [players, setPlayers] = useState<
@@ -97,7 +98,22 @@ export default function PortalPage() {
   const baseTotal = hasPlayerPrice ? playersTotal : servicePrice;
   const grandTotal = baseTotal + productsTotal;
 
-  useEffect(() => setSlot(null), [service, date, court]);
+  // Recursos que se pueden reservar (las referencias del mapa —bar, entrada— no)
+  // Y que ofrecen el servicio elegido: si el servicio tiene profesionales
+  // asignados solo van esos, si no tiene lo hacen todos. Mismo criterio que usa
+  // el backend para calcular los horarios.
+  const bookableResources = (info?.resources ?? []).filter(
+    (r) => !r.reference && (!service?.resourceIds.length || service.resourceIds.includes(r.id)),
+  );
+  // El paso del profesional se muestra aunque haya uno solo: aunque no haya nada
+  // que elegir, el cliente tiene que saber quién lo va a atender.
+  const pickStaff = !canchas && bookableResources.length > 0;
+  const onlyStaff = bookableResources.length === 1;
+  const stepDate = canchas || pickStaff ? 3 : 2;
+
+  useEffect(() => setSlot(null), [service, date, court, staff]);
+  // Si cambia el servicio, el profesional elegido puede no ofrecerlo: volvemos a "cualquiera".
+  useEffect(() => setStaff(null), [service]);
 
   // Si el servicio pide una cantidad fija, dejamos exactamente esa cantidad de filas.
   useEffect(() => {
@@ -113,8 +129,9 @@ export default function PortalPage() {
   }, [fixedPlayers, requiredPlayers]);
 
   const { data: slots, isFetching: loadingSlots } = useQuery({
-    queryKey: ['portal', 'availability', service?.id, date],
-    queryFn: () => getPortalAvailability(service!.id, date),
+    queryKey: ['portal', 'availability', service?.id, date, staff],
+    // El backend filtra por profesional (y valida que ofrezca el servicio).
+    queryFn: () => getPortalAvailability(service!.id, date, staff ?? undefined),
     enabled: !!service,
   });
 
@@ -183,11 +200,17 @@ export default function PortalPage() {
           <p className="text-sm text-[var(--color-muted-foreground)]">
             {service?.name} · {fmtLongDate(date)} a las {fmtTime(done.startAt)}.
           </p>
-          {canchas && done.resourceName && (
-            <p className="flex items-center gap-1.5 text-sm font-medium">
-              <MapPin className="h-4 w-4 text-[var(--color-primary)]" /> {done.resourceName}
-            </p>
-          )}
+          {done.resourceName &&
+            (canchas ? (
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                <MapPin className="h-4 w-4 text-[var(--color-primary)]" /> {done.resourceName}
+              </p>
+            ) : (
+              // Aunque haya elegido "cualquiera", le decimos con quién le tocó.
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                <Users className="h-4 w-4 text-[var(--color-primary)]" /> Con {done.resourceName}
+              </p>
+            ))}
           <p className="text-sm text-[var(--color-muted-foreground)]">Te esperamos 🙌</p>
         </div>
 
@@ -212,6 +235,7 @@ export default function PortalPage() {
             setDone(null);
             setService(null);
             setSlot(null);
+            setStaff(null);
             setFirstName('');
             setPhone('');
             setPlayers([
@@ -291,9 +315,72 @@ export default function PortalPage() {
         </Section>
       )}
 
+      {/* Profesional (modo turnos): elegir con quién, o dejar que sea cualquiera. */}
+      {service && pickStaff && (
+        <Section step={2} title={onlyStaff ? 'Te atiende' : 'Elegí el profesional'}>
+          <div className="grid gap-2">
+            {/* Con un solo profesional no hay nada que elegir: se muestra y listo. */}
+            {!onlyStaff && (
+              <button
+                onClick={() => setStaff(null)}
+                className={`flex items-center gap-3 rounded-[var(--radius)] border p-3 text-left transition-colors ${
+                  staff === null
+                    ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10'
+                    : 'border-[var(--color-border)] hover:bg-[var(--color-accent)]'
+                }`}
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-muted)]/50">
+                  <Users className="h-4 w-4 text-[var(--color-muted-foreground)]" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">Cualquiera</span>
+                  <span className="block text-xs text-[var(--color-muted-foreground)]">
+                    El primero que esté libre en el horario que elijas
+                  </span>
+                </span>
+              </button>
+            )}
+            {bookableResources.map((r) => (
+              <button
+                key={r.id}
+                disabled={onlyStaff}
+                onClick={() => setStaff(r.id === staff ? null : r.id)}
+                className={`flex items-center gap-3 rounded-[var(--radius)] border p-3 text-left transition-colors ${
+                  staff === r.id || onlyStaff
+                    ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10'
+                    : 'border-[var(--color-border)] hover:bg-[var(--color-accent)]'
+                }`}
+              >
+                {r.avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={r.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
+                ) : (
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/15 text-sm font-medium text-[var(--color-primary)]">
+                    {r.name.trim().charAt(0).toUpperCase()}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{r.name}</span>
+                  {r.title && (
+                    <span className="block truncate text-xs text-[var(--color-muted-foreground)]">
+                      {r.title}
+                    </span>
+                  )}
+                </span>
+                {r.rating.count > 0 && (
+                  <span className="shrink-0 text-xs text-[var(--color-muted-foreground)]">
+                    ★ {r.rating.avg?.toFixed(1)}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {/* 2/3. Día + horario */}
       {service && (
-        <Section step={canchas ? 3 : 2} title="Elegí día y horario">
+        <Section step={stepDate} title="Elegí día y horario">
           <div className="mb-3 flex items-center gap-2">
             <Button
               variant="outline"
@@ -354,7 +441,7 @@ export default function PortalPage() {
 
       {/* 3/4. Datos + confirmar */}
       {service && slot && (
-        <Section step={canchas ? 4 : 3} title="Tus datos">
+        <Section step={stepDate + 1} title="Tus datos">
           <div className="space-y-3">
             <div className="flex flex-col gap-1.5">
               <Label>Nombre</Label>

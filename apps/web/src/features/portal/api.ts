@@ -60,6 +60,8 @@ export type PortalInfo = {
     askPeople: boolean;
     /** Cuántas personas pide (fijo). Null = sin tope definido. */
     peopleCount: number | null;
+    /** Quiénes lo ofrecen. Vacío = todos. */
+    resourceIds: string[];
   }[];
   /** Productos (variantes) que se pueden reservar junto al turno. */
   products: {
@@ -76,8 +78,10 @@ export const getPortalInfo = () => apiFetch<PortalInfo>('/portal/info', { tenant
 
 export type PortalSlot = { startAt: string; endAt: string; resourceId: string };
 
-export const getPortalAvailability = (serviceId: string, date: string) => {
+/** Horarios libres. Sin resourceId, busca en todos los que ofrecen el servicio. */
+export const getPortalAvailability = (serviceId: string, date: string, resourceId?: string) => {
   const qs = new URLSearchParams({ serviceId, date });
+  if (resourceId) qs.set('resourceId', resourceId);
   return apiFetch<PortalSlot[]>(`/portal/availability?${qs.toString()}`, { tenantSlug: slug() });
 };
 

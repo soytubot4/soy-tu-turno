@@ -12,6 +12,7 @@ import {
   deleteResource,
   type Resource,
 } from '@/features/equipo/api';
+import { listServices } from '@/features/servicios/api';
 import { useMe } from '@/features/me/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -275,6 +276,9 @@ function ProfessionalRow({
   const [name, setName] = useState(r.name);
   const [title, setTitle] = useState(r.title ?? '');
   const [phone, setPhone] = useState(r.phone ?? '');
+  const [serviceIds, setServiceIds] = useState<string[]>(r.serviceIds);
+  const { data: services } = useQuery({ queryKey: ['services'], queryFn: listServices });
+  const activeServices = (services ?? []).filter((s) => s.active);
 
   const save = useMutation({
     mutationFn: () =>
@@ -282,6 +286,7 @@ function ProfessionalRow({
         name: name.trim(),
         title: title.trim(),
         phone: phone.trim() || null,
+        serviceIds,
       }),
     onSuccess: () => {
       toast.success('Actualizado');
@@ -295,8 +300,12 @@ function ProfessionalRow({
     setName(r.name);
     setTitle(r.title ?? '');
     setPhone(r.phone ?? '');
+    setServiceIds(r.serviceIds);
     setEditing(true);
   }
+
+  const toggleService = (id: string) =>
+    setServiceIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
 
   if (editing) {
     return (
@@ -315,6 +324,30 @@ function ProfessionalRow({
             <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full sm:w-36" placeholder="11 2345-6789" />
           </div>
         </div>
+        {activeServices.length > 0 && (
+          <div className="flex flex-col gap-1 sm:w-full">
+            <Label className="text-[10px] text-[var(--color-muted-foreground)]">
+              Servicios que hace{' '}
+              {serviceIds.length === 0 && '(sin tildar = los que nadie más se asignó)'}
+            </Label>
+            <div className="flex flex-wrap gap-1.5">
+              {activeServices.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => toggleService(s.id)}
+                  className={`rounded-[var(--radius)] border px-2.5 py-1.5 text-xs transition-colors ${
+                    serviceIds.includes(s.id)
+                      ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 font-medium'
+                      : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/50'
+                  }`}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex gap-2">
           <Button className="flex-1 sm:flex-none" size="sm" onClick={() => save.mutate()} disabled={save.isPending || !name.trim()}>
             Guardar
@@ -337,6 +370,14 @@ function ProfessionalRow({
         {(r.title || r.phone) && (
           <p className="truncate text-xs text-[var(--color-muted-foreground)]">
             {[r.title, r.phone].filter(Boolean).join(' · ')}
+          </p>
+        )}
+        {r.serviceIds.length > 0 && (
+          <p className="truncate text-xs text-[var(--color-muted-foreground)]">
+            {r.serviceIds
+              .map((id) => activeServices.find((s) => s.id === id)?.name)
+              .filter(Boolean)
+              .join(' · ')}
           </p>
         )}
       </div>

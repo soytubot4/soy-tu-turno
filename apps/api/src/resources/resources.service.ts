@@ -53,7 +53,7 @@ export class ResourcesService {
           mapY = 40 + Math.floor(n / 6) * 60 + (n % 2) * 20;
         }
       }
-      return tx.resource.create({
+      const resource = await tx.resource.create({
         data: {
           tenantId: ctx.tenantId,
           name: input.name.trim(),
@@ -77,6 +77,8 @@ export class ResourcesService {
         },
         select: { id: true },
       });
+      await this.syncServices(tx, ctx.tenantId, resource.id, input.serviceIds ?? []);
+      return resource;
     });
   }
 
@@ -91,7 +93,7 @@ export class ResourcesService {
     return this.prisma.tenantSafe(async (tx) => {
       const found = await tx.resource.findFirst({ where: { id, tenantId: ctx.tenantId } });
       if (!found) throw new NotFoundException('Recurso no encontrado');
-      return tx.resource.update({
+      const updated = await tx.resource.update({
         where: { id },
         data: {
           ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -113,7 +115,35 @@ export class ResourcesService {
         },
         select: { id: true },
       });
+      if (input.serviceIds !== undefined) {
+        await this.syncServices(tx, ctx.tenantId, id, input.serviceIds);
+      }
+      return updated;
     });
+  }
+
+  /** Reemplaza el set de servicios que ofrece el recurso (solo servicios del tenant). */
+  private async syncServices(tx: Tx, tenantId: string, resourceId: string, serviceIds: string[]) {
+    const valid = await tx.service.findMany({
+      where: { id: { in: serviceIds }, tenantId },
+      select: { id: true },
+    });
+    const validIds = valid.map((s) => s.id);
+    await tx.resourceService.deleteMany({
+      where: { resourceId, ...(validIds.length ? { serviceId: { notIn: validIds } } : {}) },
+    });
+    if (!validIds.length) return;
+    const existing = await tx.resourceService.findMany({
+      where: { resourceId },
+      select: { serviceId: true },
+    });
+    const have = new Set(existing.map((e) => e.serviceId));
+    const toCreate = validIds.filter((sid) => !have.has(sid));
+    if (toCreate.length) {
+      await tx.resourceService.createMany({
+        data: toCreate.map((serviceId) => ({ tenantId, resourceId, serviceId })),
+      });
+    }
   }
 
   /** Guarda en lote las posiciones/rotaciones de las canchas (editor de mapa). */
