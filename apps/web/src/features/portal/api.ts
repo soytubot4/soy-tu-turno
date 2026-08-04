@@ -48,6 +48,12 @@ export type PortalInfo = {
   weekendPricing: boolean;
   /** Categorías de persona activas: cuánto paga cada una. */
   playerCategories: PlayerCategoryDto[];
+  /** Recargo por luz a partir de cierta hora. null = no lo cobran. */
+  light: { from: string; price: number } | null;
+  /** Link de Google Maps del comercio (para «Cómo llegar»). */
+  mapsUrl: string | null;
+  /** Mismo lugar, en formato embebible en un iframe. */
+  mapsEmbedUrl: string | null;
   rating: Rating;
   services: {
     id: string;

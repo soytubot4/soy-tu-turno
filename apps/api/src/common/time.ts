@@ -79,3 +79,35 @@ export function hhmmToMinutes(hhmm: string): number {
 export function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
   return aStart < bEnd && bStart < aEnd;
 }
+
+/**
+ * Recargo por luz del turno (monto fijo, no por persona). Devuelve 0 si el
+ * comercio no lo tiene activado o si el turno termina antes de la hora de luz.
+ *
+ * Se cobra si CUALQUIER parte del turno cae después de la hora configurada, no
+ * solo si arranca ahí: un turno de 18:30 a 20:00 usa luz una hora y media. Los
+ * minutos se cuentan desde la medianoche del día en que empieza, así un turno
+ * que cruza las 00:00 queda siempre del lado de la noche.
+ */
+export function lightSurcharge(
+  turnoConfig: unknown,
+  startAtIso: string,
+  durationMin: number,
+  timeZone: string,
+): number {
+  const cfg = (turnoConfig ?? {}) as Record<string, unknown>;
+  if (cfg.lightEnabled !== true) return 0;
+  const price = typeof cfg.lightPrice === 'number' ? cfg.lightPrice : 0;
+  if (price <= 0) return 0;
+  const from = typeof cfg.lightFrom === 'string' ? cfg.lightFrom : '19:00';
+
+  // Hora de pared del inicio, en la timezone del comercio.
+  const hhmm = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hourCycle: 'h23',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(startAtIso));
+
+  return hhmmToMinutes(hhmm) + durationMin > hhmmToMinutes(from) ? price : 0;
+}

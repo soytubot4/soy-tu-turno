@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Trash2, CalendarOff } from 'lucide-react';
-import { DAY_LABELS, SLOT_STEP_OPTIONS, type HourRange } from '@soytuturno/shared';
+import { DAY_LABELS, SLOT_STEP_OPTIONS, mapsEmbedUrl, type HourRange } from '@soytuturno/shared';
 import { listResources, updateResource } from '@/features/equipo/api';
 import { listServices } from '@/features/servicios/api';
 import {
@@ -78,9 +78,13 @@ export default function HorariosPage() {
 
       {canSettings && <DirectoryToggleCard />}
 
+      {canSettings && <LocationCard />}
+
       {canSettings && canchas && <PlayersToggleCard />}
 
       {canSettings && canchas && <PlayerCategoriesCard />}
+
+      {canSettings && canchas && <LightSurchargeCard />}
 
       {canSchedule && (resources ?? []).length > 1 && (
         <div className="flex flex-wrap gap-2">
@@ -301,6 +305,181 @@ function PlayersToggleCard() {
             <span className="text-sm">Pedir datos de los jugadores al reservar</span>
           </label>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Recargo por luz: monto fijo que se suma al turno cuando usa luz artificial.
+ * Se cobra si cualquier parte del turno cae después de la hora configurada, no
+ * solo si arranca ahí — un turno de 18:30 a 20:00 usa luz una hora y media.
+ */
+function LightSurchargeCard() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const [on, setOn] = useState(false);
+  const [from, setFrom] = useState('19:00');
+  const [price, setPrice] = useState('');
+
+  useEffect(() => {
+    if (!data) return;
+    setOn(data.lightEnabled);
+    setFrom(data.lightFrom || '19:00');
+    setPrice(data.lightPrice != null ? String(data.lightPrice) : '');
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      updateTurnoSettings({
+        lightEnabled: on,
+        lightFrom: from,
+        lightPrice: price.trim() ? Number(price) : null,
+      }),
+    onSuccess: () => {
+      toast.success('Guardado');
+      qc.invalidateQueries({ queryKey: ['turno-settings'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const norm = (s: string) => (s.trim() ? String(Number(s)) : '');
+  const dirty =
+    !!data &&
+    (on !== data.lightEnabled ||
+      from !== (data.lightFrom || '19:00') ||
+      norm(price) !== (data.lightPrice != null ? String(data.lightPrice) : ''));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Recargo por luz</CardTitle>
+        <CardDescription>
+          Si cobran un extra por jugar de noche, se suma solo al total del turno. Es un monto fijo
+          por turno, no por jugador.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={on}
+            onChange={(e) => setOn(e.target.checked)}
+            className="h-4 w-4 accent-[var(--color-primary)]"
+          />
+          Cobrar recargo por luz
+        </label>
+
+        {on && (
+          <>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-[var(--color-muted-foreground)]">Desde las</Label>
+                <Input
+                  type="time"
+                  value={from}
+                  onChange={(e) => setFrom(e.target.value)}
+                  className="w-32"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-[var(--color-muted-foreground)]">Cuánto</Label>
+                <PriceCell value={price} onChange={setPrice} />
+              </div>
+            </div>
+            <p className="text-xs text-[var(--color-muted-foreground)]">
+              Se cobra si el turno usa luz aunque sea un rato: uno de {from} en adelante lo paga, y
+              uno que arranca antes pero termina después de las {from}, también.
+            </p>
+          </>
+        )}
+
+        <div className="flex justify-end gap-2">
+          {dirty && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setOn(data!.lightEnabled);
+                setFrom(data!.lightFrom || '19:00');
+                setPrice(data!.lightPrice != null ? String(data!.lightPrice) : '');
+              }}
+              disabled={save.isPending}
+            >
+              Revertir cambios
+            </Button>
+          )}
+          <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
+            {save.isPending ? 'Guardando…' : 'Guardar'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Link de Google Maps del comercio: se muestra como mapa en el portal. */
+function LocationCard() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const [url, setUrl] = useState('');
+  useEffect(() => setUrl(data?.mapsUrl ?? ''), [data]);
+
+  const save = useMutation({
+    mutationFn: () => updateTurnoSettings({ mapsUrl: url.trim() }),
+    onSuccess: () => {
+      toast.success('Ubicación guardada');
+      qc.invalidateQueries({ queryKey: ['turno-settings'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const dirty = !!data && url.trim() !== (data.mapsUrl ?? '');
+  const preview = mapsEmbedUrl(url, null);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Ubicación</CardTitle>
+        <CardDescription>
+          Pegá el link de Google Maps del local y el cliente ve el mapa en la página de reservas,
+          con un botón para abrir «Cómo llegar».
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs text-[var(--color-muted-foreground)]">Link de Google Maps</Label>
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://maps.app.goo.gl/…"
+          />
+          <p className="text-xs text-[var(--color-muted-foreground)]">
+            Buscá el local en Google Maps y tocá <span className="font-medium">Compartir</span> →
+            copiar link. Si querés que el mapa caiga exacto, mejor usá{' '}
+            <span className="font-medium">Compartir → Insertar un mapa</span> y pegá esa dirección.
+          </p>
+        </div>
+
+        {preview && (
+          <iframe
+            src={preview}
+            title="Vista previa de la ubicación"
+            className="h-48 w-full rounded-[var(--radius)] border border-[var(--color-border)]"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        )}
+
+        <div className="flex justify-end gap-2">
+          {dirty && (
+            <Button variant="ghost" onClick={() => setUrl(data?.mapsUrl ?? '')} disabled={save.isPending}>
+              Revertir cambios
+            </Button>
+          )}
+          <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
+            {save.isPending ? 'Guardando…' : 'Guardar'}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

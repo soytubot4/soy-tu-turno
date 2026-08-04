@@ -506,7 +506,65 @@ export const updateTurnoSettingsSchema = z.object({
   listedOnLanding: z.boolean().optional(),
   // Precios diferenciados de fin de semana (sábado/domingo) en las categorías.
   priceWeekendEnabled: z.boolean().optional(),
+  // Recargo por luz: se suma solo a los turnos que usan luz artificial.
+  lightEnabled: z.boolean().optional(),
+  // 'HH:MM' — desde qué hora se considera que el turno usa luz.
+  lightFrom: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:MM)')
+    .optional(),
+  lightPrice: z.coerce.number().nonnegative().nullable().optional(),
+  // Ubicación: link de Google Maps que pega el comercio (se muestra en el portal).
+  mapsUrl: z.string().trim().max(600).optional(),
 });
+
+/**
+ * ¿El turno usa luz? Se cobra si CUALQUIER parte cae después de la hora de luz,
+ * no solo si arranca ahí: un turno de 18:30 a 20:00 usa luz una hora y media.
+ * Los minutos se cuentan desde la medianoche del día en que empieza, así un
+ * turno que cruza las 00:00 queda siempre del lado de la noche.
+ */
+export function usesLight(
+  startHHMM: string,
+  durationMin: number,
+  lightFrom: string,
+): boolean {
+  const toMin = (s: string) => {
+    const [h, m] = s.split(':').map(Number);
+    return (h ?? 0) * 60 + (m ?? 0);
+  };
+  const from = toMin(lightFrom);
+  const end = toMin(startHHMM) + durationMin;
+  return end > from;
+}
+
+/**
+ * Link de Google Maps → URL embebible en un iframe.
+ *
+ * Los links de «Compartir» (maps.app.goo.gl/…) no se pueden embeber, así que
+ * sacamos las coordenadas del link cuando están y armamos el embed con eso. Si
+ * no hay forma, caemos a buscar la dirección del comercio. Devuelve null si no
+ * hay ni link ni dirección.
+ */
+export function mapsEmbedUrl(rawUrl: string | null | undefined, address?: string | null): string | null {
+  const url = (rawUrl ?? '').trim();
+  const q = (v: string) => `https://maps.google.com/maps?q=${encodeURIComponent(v)}&z=16&output=embed`;
+
+  if (url) {
+    // Ya es un embed (el del botón «Insertar un mapa»): se usa tal cual.
+    if (/^https:\/\/(www\.)?google\.[a-z.]+\/maps\/embed/i.test(url)) return url;
+    // Coordenadas dentro del link: /@-32.94,-60.65,17z  o  !3d-32.94!4d-60.65
+    const at = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    const bang = url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+    const qq = url.match(/[?&]q=(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
+    const hit = bang ?? at ?? qq;
+    if (hit) return q(`${hit[1]},${hit[2]}`);
+    // Link con el lugar por nombre: /maps/place/Club+Talleres/…
+    const place = url.match(/\/maps\/place\/([^/@?]+)/);
+    if (place?.[1]) return q(decodeURIComponent(place[1].replace(/\+/g, ' ')));
+  }
+  return address?.trim() ? q(address.trim()) : null;
+}
 
 /** ¿La fecha YYYY-MM-DD cae sábado o domingo? (día local). */
 export function isWeekendDate(dateStr: string): boolean {

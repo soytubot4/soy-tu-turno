@@ -10,6 +10,7 @@ import { PrismaService } from '@/prisma/prisma.service';
 import { requireTenantContext } from '@/prisma/tenant-context';
 import { assertCan } from '@/auth/capabilities';
 import { ProductsService } from '@/products/products.service';
+import { lightSurcharge } from '@/common/time';
 
 type Tx = Parameters<Parameters<PrismaService['tenantSafe']>[0]>[0];
 
@@ -129,7 +130,9 @@ export class AppointmentsService {
       const reserved = await this.products.reserve(tx, ctx.tenantId, input.products ?? []);
       const productsTotal = reserved.reduce((s, p) => s + (p.price ?? 0) * p.qty, 0);
       const baseTotal = hasAnyPrice ? playersTotal : service.price != null ? Number(service.price) : 0;
-      const anyPrice = hasAnyPrice || service.price != null || productsTotal > 0;
+      // Recargo por luz: monto fijo del turno si usa luz artificial.
+      const light = lightSurcharge(cfg, input.startAt, service.durationMin, tz);
+      const anyPrice = hasAnyPrice || service.price != null || productsTotal > 0 || light > 0;
 
       try {
         return await tx.appointment.create({
@@ -142,7 +145,7 @@ export class AppointmentsService {
             endAt,
             status: 'CONFIRMED',
             source: 'ADMIN',
-            priceAtBooking: anyPrice ? baseTotal + productsTotal : null,
+            priceAtBooking: anyPrice ? baseTotal + productsTotal + light : null,
             notes: input.notes?.trim() || null,
             players: players.length ? players : undefined,
             products: reserved.length ? reserved : undefined,

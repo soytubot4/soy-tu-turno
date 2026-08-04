@@ -2,12 +2,14 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import {
   playerPrice,
   isWeekendDate,
+  mapsEmbedUrl,
   type PortalBookInput,
   type PortalReviewInput,
 } from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
 import { AvailabilityService } from '@/appointments/availability.service';
 import { ProductsService } from '@/products/products.service';
+import { lightSurcharge, tenantTimezone } from '@/common/time';
 
 type Tx = Parameters<Parameters<PrismaService['tenantSafe']>[0]>[0];
 
@@ -142,6 +144,14 @@ export class PortalService {
       askPlayers: cfg.askPlayers === true,
       weekendPricing: cfg.priceWeekendEnabled === true,
       playerCategories: base.playerCategories,
+      // Recargo por luz: el portal lo muestra en el total antes de reservar.
+      light:
+        cfg.lightEnabled === true && typeof cfg.lightPrice === 'number' && cfg.lightPrice > 0
+          ? { from: typeof cfg.lightFrom === 'string' ? cfg.lightFrom : '19:00', price: cfg.lightPrice }
+          : null,
+      // Ubicación: mapa embebido + link para abrir en Google Maps.
+      mapsUrl: typeof cfg.mapsUrl === 'string' && cfg.mapsUrl ? cfg.mapsUrl : null,
+      mapsEmbedUrl: mapsEmbedUrl(cfg.mapsUrl as string | null, base.tenant?.address),
       rating: business,
       services: base.services,
       products: base.products,
@@ -261,7 +271,9 @@ export class PortalService {
         const productsTotal = reserved.reduce((s, p) => s + (p.price ?? 0) * p.qty, 0);
 
         const baseTotal = hasAnyPrice ? playersTotal : service.price != null ? Number(service.price) : 0;
-        const anyPrice = hasAnyPrice || service.price != null || productsTotal > 0;
+        // Recargo por luz: monto fijo del turno si usa luz artificial.
+        const light = lightSurcharge(cfg, input.startAt, service.durationMin, tenantTimezone(cfg));
+        const anyPrice = hasAnyPrice || service.price != null || productsTotal > 0 || light > 0;
         const appt = await tx.appointment.create({
           data: {
             tenantId,
@@ -272,7 +284,7 @@ export class PortalService {
             endAt,
             status: 'CONFIRMED',
             source: 'WEB',
-            priceAtBooking: anyPrice ? baseTotal + productsTotal : null,
+            priceAtBooking: anyPrice ? baseTotal + productsTotal + light : null,
             players: players.length ? players : undefined,
             products: reserved.length ? reserved : undefined,
           },

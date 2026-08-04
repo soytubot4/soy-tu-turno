@@ -3,8 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CalendarCheck, Clock, ChevronLeft, ChevronRight, CheckCircle2, MapPin, Plus, Users, X } from 'lucide-react';
-import { SPORT_LABELS, PRICE_UNIT_LABELS, playerPrice, isWeekendDate, type Sport } from '@soytuturno/shared';
+import { CalendarCheck, Clock, ChevronLeft, ChevronRight, CheckCircle2, Lightbulb, MapPin, Plus, Users, X } from 'lucide-react';
+import {
+  SPORT_LABELS,
+  PRICE_UNIT_LABELS,
+  playerPrice,
+  isWeekendDate,
+  usesLight,
+  type Sport,
+} from '@soytuturno/shared';
 import {
   getPortalInfo,
   getPortalAvailability,
@@ -96,7 +103,14 @@ export default function PortalPage() {
   );
   const servicePrice = service?.price != null ? Number(service.price) : 0;
   const baseTotal = hasPlayerPrice ? playersTotal : servicePrice;
-  const grandTotal = baseTotal + productsTotal;
+  // Recargo por luz: se cobra si cualquier parte del turno cae después de la hora
+  // configurada. Mismo criterio que aplica el backend al confirmar la reserva.
+  const lightCfg = info?.light ?? null;
+  const lightFee =
+    lightCfg && slot && service && usesLight(fmtTime(slot.startAt), service.durationMin, lightCfg.from)
+      ? lightCfg.price
+      : 0;
+  const grandTotal = baseTotal + productsTotal + lightFee;
 
   // Recursos que se pueden reservar (las referencias del mapa —bar, entrada— no)
   // Y que ofrecen el servicio elegido: si el servicio tiene profesionales
@@ -193,7 +207,13 @@ export default function PortalPage() {
 
   if (done) {
     return (
-      <Shell name={info.tenant.name} rating={info.rating}>
+      <Shell
+      name={info.tenant.name}
+      rating={info.rating}
+      address={info.tenant.address}
+      mapsUrl={info.mapsUrl}
+      mapsEmbedUrl={info.mapsEmbedUrl}
+    >
         <div className="flex flex-col items-center gap-3 rounded-[calc(var(--radius)+0.25rem)] border border-[var(--color-border)] bg-[var(--color-card)] p-8 text-center">
           <CheckCircle2 className="h-12 w-12 text-[var(--color-success)]" />
           <h2 className="text-xl font-semibold">¡Turno reservado!</h2>
@@ -252,7 +272,13 @@ export default function PortalPage() {
   }
 
   return (
-    <Shell name={info.tenant.name} rating={info.rating}>
+    <Shell
+      name={info.tenant.name}
+      rating={info.rating}
+      address={info.tenant.address}
+      mapsUrl={info.mapsUrl}
+      mapsEmbedUrl={info.mapsEmbedUrl}
+    >
       {/* 1. Servicio */}
       <Section step={1} title="Elegí el servicio">
         <div className="grid gap-2">
@@ -588,6 +614,15 @@ export default function PortalPage() {
             </div>
           )}
 
+          {lightFee > 0 && (
+            <div className="mt-3 flex items-center justify-between gap-2 text-sm">
+              <span className="flex items-center gap-1.5 text-[var(--color-muted-foreground)]">
+                <Lightbulb className="h-3.5 w-3.5" /> Luz (después de las {lightCfg?.from})
+              </span>
+              <span className="font-medium">${lightFee.toLocaleString('es-AR')}</span>
+            </div>
+          )}
+
           {grandTotal > 0 && (
             <div className="mt-3 flex items-center justify-between border-t border-[var(--color-border)] pt-2 text-base font-semibold">
               <span>Total a pagar</span>
@@ -617,10 +652,16 @@ export default function PortalPage() {
 function Shell({
   name,
   rating,
+  address,
+  mapsUrl,
+  mapsEmbedUrl,
   children,
 }: {
   name: string;
   rating?: Rating;
+  address?: string | null;
+  mapsUrl?: string | null;
+  mapsEmbedUrl?: string | null;
   children: React.ReactNode;
 }) {
   return (
@@ -631,10 +672,50 @@ function Shell({
         <p className="text-sm text-[var(--color-muted-foreground)]">Reservá tu turno online</p>
       </header>
       {children}
+      {mapsEmbedUrl && <LocationBlock address={address} mapsUrl={mapsUrl} embed={mapsEmbedUrl} />}
       <footer className="pb-6 pt-2 text-center text-xs text-[var(--color-muted-foreground)]">
         con <span className="font-semibold">soytuturno</span>
       </footer>
     </main>
+  );
+}
+
+/** Dónde queda el local: mapa embebido + botón para abrirlo en Google Maps. */
+function LocationBlock({
+  address,
+  mapsUrl,
+  embed,
+}: {
+  address?: string | null;
+  mapsUrl?: string | null;
+  embed: string;
+}) {
+  return (
+    <section className="overflow-hidden rounded-[calc(var(--radius)+0.25rem)] border border-[var(--color-border)] bg-[var(--color-card)]">
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">Dónde estamos</p>
+          {address && (
+            <p className="truncate text-xs text-[var(--color-muted-foreground)]">{address}</p>
+          )}
+        </div>
+        <a
+          href={mapsUrl || embed}
+          target="_blank"
+          rel="noreferrer"
+          className="flex shrink-0 items-center gap-1.5 rounded-[var(--radius)] border border-[var(--color-border)] px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--color-accent)]"
+        >
+          <MapPin className="h-3.5 w-3.5 text-[var(--color-primary)]" /> Cómo llegar
+        </a>
+      </div>
+      <iframe
+        src={embed}
+        title="Ubicación"
+        className="h-52 w-full border-0"
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+      />
+    </section>
   );
 }
 
