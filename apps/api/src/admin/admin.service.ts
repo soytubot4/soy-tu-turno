@@ -281,10 +281,12 @@ export class AdminService {
     if (!this.domains.enabled) {
       throw new ConflictException('DigitalOcean no está configurado en este entorno');
     }
-    return this.runDomainProvisioning(id, tenant.slug, {
-      staff: tenant.staffDomainStatus !== 'PROVISIONED',
-      customer: tenant.customerDomainStatus !== 'PROVISIONED',
-    });
+    // Forzamos las dos superficies aunque el estado diga PROVISIONED. Dos motivos:
+    // el botón se aprieta justo cuando algo NO anda, y estas columnas están en la
+    // tabla `tenants`, que es compartida con soytucanje: un tenant puede figurar
+    // provisionado por canje y no tener nada creado del lado de turno.
+    // Las operaciones contra DO son idempotentes, así que repetirlas no rompe.
+    return this.runDomainProvisioning(id, tenant.slug, { staff: true, customer: true });
   }
 
   /**

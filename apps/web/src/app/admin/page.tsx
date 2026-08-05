@@ -3,11 +3,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { LogOut, Store, Plus, Pencil, Trash2 } from 'lucide-react';
+import { LogOut, Store, Plus, Pencil, Trash2, Globe } from 'lucide-react';
 import {
   listAdminTenants,
   updateTenantTurno,
   deleteAdminTenant,
+  reprovisionDomains,
   type AdminTenant,
 } from '@/features/admin/api';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -102,6 +103,18 @@ function TenantRow({ tenant, onEdit }: { tenant: AdminTenant; onEdit: () => void
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Rehace los subdominios en DigitalOcean. Se usa cuando el comercio existía
+  // antes de que estuviera configurado el provisioning, o si algo quedó a medias.
+  const reprovision = useMutation({
+    mutationFn: () => reprovisionDomains(tenant.id),
+    onSuccess: (r) => {
+      if (r.errors?.length) toast.error(`Con errores: ${r.errors.join(' · ')}`);
+      else toast.success('Dominios rehechos. El certificado puede tardar unos minutos.');
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const remove = useMutation({
     mutationFn: () => deleteAdminTenant(tenant.id),
     onSuccess: () => {
@@ -144,6 +157,16 @@ function TenantRow({ tenant, onEdit }: { tenant: AdminTenant; onEdit: () => void
           disabled={toggle.isPending}
         >
           {tenant.turnoEnabled ? 'Turnero activo' : 'Activar turnero'}
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          title="Rehacer los subdominios en DigitalOcean"
+          onClick={() => reprovision.mutate()}
+          disabled={reprovision.isPending}
+        >
+          <Globe className={`h-4 w-4 ${reprovision.isPending ? 'animate-pulse' : ''}`} />
         </Button>
 
         <Button variant="ghost" size="icon" title="Editar" onClick={onEdit}>

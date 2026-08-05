@@ -13,6 +13,7 @@ import {
 } from '@/features/agenda/api';
 import { getTurnoSettings } from '@/features/horarios/settings-api';
 import { useMe } from '@/features/me/api';
+import { resourceLabel } from '@/lib/labels';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -445,6 +446,9 @@ function AppointmentDetailDialog({
   onComplete: (id: string) => void;
   onNoShow: (id: string) => void;
 }) {
+  // El recurso se llama distinto según el rubro: cancha en un club, profesional
+  // en una peluquería.
+  const { canchas } = useMe();
   return (
     <Dialog open={!!appt} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
@@ -471,7 +475,9 @@ function AppointmentDetailDialog({
               />
               <DetailRow label="Servicio" value={appt.service.name} />
               <div className="flex items-start justify-between gap-3">
-                <span className="shrink-0 text-[var(--color-muted-foreground)]">Cancha</span>
+                <span className="shrink-0 text-[var(--color-muted-foreground)]">
+                  {resourceLabel(canchas)}
+                </span>
                 <span className="flex items-center gap-1.5 text-right font-medium">
                   <MapPin className="h-3.5 w-3.5 text-[var(--color-primary)]" /> {appt.resource.name}
                 </span>

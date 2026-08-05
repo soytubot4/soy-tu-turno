@@ -45,3 +45,13 @@ export const updateTenantTurno = (id: string, input: AdminUpdateTurnoInput) =>
     `/admin/tenants/${id}/turno`,
     { method: 'PATCH', body: input },
   );
+
+/**
+ * Rehace los subdominios del comercio en DigitalOcean (CNAME + dominio en la app,
+ * que es lo que dispara el certificado). Fuerza las dos superficies: se usa
+ * justamente cuando algo no quedó bien.
+ */
+export const reprovisionDomains = (id: string) =>
+  apiFetch<{ ok: boolean; errors?: string[] }>(`/admin/tenants/${id}/reprovision-domains`, {
+    method: 'POST',
+  });
