@@ -382,7 +382,7 @@ function SlotForm({
             type="time"
             value={form.startTime}
             onChange={(e) => set({ startTime: e.target.value })}
-            className="w-28"
+            className="w-[9.5rem] px-2"
           />
         </div>
         <div className="flex flex-col gap-1">
@@ -391,7 +391,7 @@ function SlotForm({
             type="time"
             value={form.endTime}
             onChange={(e) => set({ endTime: e.target.value })}
-            className="w-28"
+            className="w-[9.5rem] px-2"
           />
         </div>
         <div className="flex min-w-[140px] flex-1 flex-col gap-1">
@@ -440,6 +440,7 @@ function SlotForm({
               type="date"
               value={form.startsOn ?? ''}
               onChange={(e) => set({ startsOn: e.target.value || null })}
+              className="w-44 px-2"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -448,6 +449,7 @@ function SlotForm({
               type="date"
               value={form.endsOn ?? ''}
               onChange={(e) => set({ endsOn: e.target.value || null })}
+              className="w-44 px-2"
             />
           </div>
         </div>

@@ -379,7 +379,7 @@ function LightSurchargeCard() {
                   type="time"
                   value={from}
                   onChange={(e) => setFrom(e.target.value)}
-                  className="w-32"
+                  className="w-[9.5rem] px-2"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -903,14 +903,14 @@ function WeeklyEditor({ resourceId, courts }: { resourceId: string; courts: { id
                         type="time"
                         value={r.from}
                         onChange={(e) => setRange(day, idx, { from: e.target.value })}
-                        className="w-32"
+                        className="w-[9.5rem] px-2"
                       />
                       <span className="text-[var(--color-muted-foreground)]">a</span>
                       <Input
                         type="time"
                         value={r.to}
                         onChange={(e) => setRange(day, idx, { to: e.target.value })}
-                        className="w-32"
+                        className="w-[9.5rem] px-2"
                       />
                       <Button
                         variant="ghost"
