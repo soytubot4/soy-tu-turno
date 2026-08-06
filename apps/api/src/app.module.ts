@@ -10,6 +10,7 @@ import { ServicesModule } from './services/services.module';
 import { PlayerCategoriesModule } from './player-categories/player-categories.module';
 import { ProductsModule } from './products/products.module';
 import { ResourcesModule } from './resources/resources.module';
+import { InstructorsModule } from './instructors/instructors.module';
 import { BlocksModule } from './blocks/blocks.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { CustomersModule } from './customers/customers.module';
@@ -30,6 +31,7 @@ import { TeamModule } from './team/team.module';
     PlayerCategoriesModule,
     ProductsModule,
     ResourcesModule,
+    InstructorsModule,
     BlocksModule,
     AppointmentsModule,
     CustomersModule,

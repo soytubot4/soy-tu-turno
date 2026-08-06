@@ -3,7 +3,19 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { CalendarDays, Scissors, Users, Settings, LogOut, ShieldCheck, Map, Package, Menu, X } from 'lucide-react';
+import {
+  CalendarDays,
+  Scissors,
+  Users,
+  Settings,
+  LogOut,
+  ShieldCheck,
+  Map,
+  Package,
+  GraduationCap,
+  Menu,
+  X,
+} from 'lucide-react';
 import type { TurnoCapability } from '@soytuturno/shared';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useMe } from '@/features/me/api';
@@ -29,6 +41,7 @@ const NAV: {
   { href: '/productos', label: 'Productos', icon: Package, productsOnly: true, capability: 'services:write' },
   { href: '/equipo', label: 'Equipo', icon: Users, canchasLabel: 'Canchas' },
   { href: '/mapa', label: 'Mapa', icon: Map, canchasOnly: true, capability: 'resources:write' },
+  { href: '/profesores', label: 'Profesores', icon: GraduationCap, canchasOnly: true, capability: 'resources:write' },
   { href: '/horarios', label: 'Configuración', icon: Settings },
   { href: '/usuarios', label: 'Usuarios', icon: ShieldCheck, capability: 'team:manage' },
 ];

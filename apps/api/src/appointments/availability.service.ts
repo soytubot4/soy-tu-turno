@@ -109,6 +109,28 @@ export class AvailabilityService {
       select: { resourceId: true, allDay: true, startAt: true, endAt: true },
     });
 
+    // Clases de los profesores ese día de la semana: ocupan la cancha igual que
+    // un turno, aunque no sean una reserva. Una franja sin cancha ocupa todas.
+    const classSlots = (
+      await tx.instructorSlot.findMany({
+        where: { tenantId, dayOfWeek: dow, active: true },
+        select: {
+          resourceId: true,
+          startTime: true,
+          endTime: true,
+          startsOn: true,
+          endsOn: true,
+        },
+      })
+    ).filter((s) => {
+      // Vigencia del ciclo de clases (inclusiva).
+      const from = s.startsOn ? s.startsOn.toISOString().slice(0, 10) : null;
+      const to = s.endsOn ? s.endsOn.toISOString().slice(0, 10) : null;
+      if (from && query.date < from) return false;
+      if (to && query.date > to) return false;
+      return true;
+    });
+
     // Turnos ya tomados ese día (no cancelados).
     const taken = await tx.appointment.findMany({
       where: {
@@ -139,7 +161,15 @@ export class AvailabilityService {
         .filter((b) => b.startAt && b.endAt)
         .map((b) => ({ start: b.startAt!.getTime(), end: b.endAt!.getTime() }));
 
-      const busy = busyByResource.get(resourceId) ?? [];
+      // Las clases de este recurso (y las que ocupan todas) valen como ocupado.
+      const classIntervals = classSlots
+        .filter((s) => s.resourceId === null || s.resourceId === resourceId)
+        .map((s) => ({
+          start: wallTimeToUtc(query.date, hhmmToMinutes(s.startTime), tz).getTime(),
+          end: wallTimeToUtc(query.date, hhmmToMinutes(s.endTime), tz).getTime(),
+        }));
+
+      const busy = [...(busyByResource.get(resourceId) ?? []), ...classIntervals];
       const ranges = rangesByResource.get(resourceId) ?? [];
 
       for (const range of ranges) {

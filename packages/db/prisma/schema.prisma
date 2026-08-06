@@ -115,6 +115,8 @@ model Tenant {
   // turnos
   services         Service[]
   resources        Resource[]
+  instructors      Instructor[]
+  instructorSlots  InstructorSlot[]
   appointments     Appointment[]
   reviews          Review[]
   playerCategories PlayerCategory[]
@@ -200,7 +202,54 @@ model Customer {
 // Tablas NUEVAS de turnos (se crean con sql/01-turnos.sql, con RLS)
 // ─────────────────────────────────────────────────────────────
 
-/// Servicio ofrecido (corte, consulta, etc.). Duración fija en minutos.
+/// Profesor que da clases en el club. No se reserva: sus horarios ocupan la
+/// cancha y dejan de ofrecerse.
+model Instructor {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  name      String
+  phone     String?
+  notes     String?
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  slots  InstructorSlot[]
+
+  @@index([tenantId])
+  @@map("instructors")
+}
+
+/// Franja semanal de clase: día + horario + en qué cancha.
+model InstructorSlot {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  instructorId String    @map("instructor_id") @db.Uuid
+  /// Cancha que ocupa la clase. Null = todas.
+  resourceId   String?   @map("resource_id") @db.Uuid
+  /// 0=Dom … 6=Sáb (igual que resource_schedules).
+  dayOfWeek    Int       @map("day_of_week")
+  startTime    String    @map("start_time") // 'HH:MM'
+  endTime      String    @map("end_time") // 'HH:MM'
+  label        String?
+  /// Vigencia del ciclo de clases (opcional).
+  startsOn     DateTime? @map("starts_on") @db.Date
+  endsOn       DateTime? @map("ends_on") @db.Date
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  instructor Instructor @relation(fields: [instructorId], references: [id], onDelete: Cascade)
+  resource   Resource?  @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, dayOfWeek])
+  @@index([instructorId])
+  @@map("instructor_slots")
+}
+
 /// Categoría de persona que define cuánto paga cada una (ej: socio con abono,
 /// socio sin abono, no socio, menor, invitado). La define cada club.
 model PlayerCategory {
@@ -221,6 +270,7 @@ model PlayerCategory {
   @@map("player_categories")
 }
 
+/// Servicio ofrecido (corte, consulta, etc.). Duración fija en minutos.
 model Service {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
@@ -277,8 +327,9 @@ model Resource {
 
   tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user         User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
-  services     ResourceService[]
-  schedules    ResourceSchedule[]
+  services        ResourceService[]
+  schedules       ResourceSchedule[]
+  instructorSlots InstructorSlot[]
   blocks       ScheduleBlock[]
   appointments Appointment[]
   reviews      Review[]

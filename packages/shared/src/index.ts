@@ -325,6 +325,86 @@ export const setResourceScheduleSchema = z.object({
 export type SetResourceScheduleInput = z.infer<typeof setResourceScheduleSchema>;
 
 // ─────────────────────────────────────────────────────────────
+// Profesores y sus horarios de clase
+// ─────────────────────────────────────────────────────────────
+export const createInstructorSchema = z.object({
+  name: z.string().trim().min(1, 'Poné el nombre').max(120),
+  phone: z.string().trim().max(30).nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+  active: z.boolean().default(true),
+  sortOrder: z.coerce.number().int().default(0),
+});
+export const updateInstructorSchema = createInstructorSchema.partial();
+export type CreateInstructorInput = z.infer<typeof createInstructorSchema>;
+export type UpdateInstructorInput = z.infer<typeof updateInstructorSchema>;
+
+/** Una clase semanal: día + horario + en qué cancha. */
+export const instructorSlotSchema = z
+  .object({
+    // Null = ocupa todas las canchas (ej: el club entero da clase a esa hora).
+    resourceId: z.string().uuid().nullable().optional(),
+    dayOfWeek: z.coerce.number().int().min(0).max(6),
+    startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:MM)'),
+    endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:MM)'),
+    label: z.string().trim().max(120).nullable().optional(),
+    // Vigencia del ciclo de clases (marzo a noviembre, por ejemplo).
+    startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    active: z.boolean().default(true),
+  })
+  .refine((v) => v.endTime > v.startTime, {
+    message: 'El horario de fin tiene que ser posterior al de inicio',
+    path: ['endTime'],
+  })
+  .refine((v) => !v.startsOn || !v.endsOn || v.endsOn >= v.startsOn, {
+    message: 'La fecha hasta es anterior a la desde',
+    path: ['endsOn'],
+  });
+export type InstructorSlotInput = z.infer<typeof instructorSlotSchema>;
+
+export type InstructorSlot = {
+  id: string;
+  resourceId: string | null;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  label: string | null;
+  startsOn: string | null;
+  endsOn: string | null;
+  active: boolean;
+};
+
+export type Instructor = {
+  id: string;
+  name: string;
+  phone: string | null;
+  notes: string | null;
+  active: boolean;
+  sortOrder: number;
+  slots: InstructorSlot[];
+};
+
+/**
+ * ¿La clase ocupa la cancha `resourceId` el día `ymd`?
+ *
+ * Se usa para descontar las clases de los horarios que se ofrecen. Una franja
+ * sin cancha ocupa todas. La vigencia (desde/hasta) es inclusiva.
+ */
+export function slotAppliesTo(
+  slot: Pick<InstructorSlot, 'resourceId' | 'dayOfWeek' | 'startsOn' | 'endsOn' | 'active'>,
+  resourceId: string,
+  dayOfWeek: number,
+  ymd: string,
+): boolean {
+  if (!slot.active) return false;
+  if (slot.dayOfWeek !== dayOfWeek) return false;
+  if (slot.resourceId && slot.resourceId !== resourceId) return false;
+  if (slot.startsOn && ymd < slot.startsOn) return false;
+  if (slot.endsOn && ymd > slot.endsOn) return false;
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Bloqueos / feriados
 // ─────────────────────────────────────────────────────────────
 export const createScheduleBlockSchema = z.object({
