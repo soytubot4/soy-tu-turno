@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ChevronLeft, ChevronRight, Plus, X, Check, Users, Phone, MapPin, Package } from 'lucide-react';
-import type { AppointmentStatusValue } from '@soytuturno/shared';
+import { slotAppliesTo, type AppointmentStatusValue } from '@soytuturno/shared';
 import {
   listAppointments,
   cancelAppointment,
@@ -12,6 +12,8 @@ import {
   type Appointment,
 } from '@/features/agenda/api';
 import { getTurnoSettings } from '@/features/horarios/settings-api';
+import { listResources } from '@/features/equipo/api';
+import { listInstructors } from '@/features/profesores/api';
 import { useMe } from '@/features/me/api';
 import { resourceLabel } from '@/lib/labels';
 import { Button } from '@/components/ui/button';
@@ -47,6 +49,22 @@ function minutesOfIso(iso: string): number {
   const d = new Date(iso);
   return d.getHours() * 60 + d.getMinutes();
 }
+/** 'HH:MM' → minutos desde medianoche. */
+function hhmmToMin(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+/** Una clase de profesor dibujada en la agenda (no es un turno reservado). */
+type ClassBlock = {
+  id: string;
+  resourceId: string;
+  startMin: number;
+  endMin: number;
+  instructor: string;
+  label: string | null;
+};
+
 /** 'HH:MM' desde minutos desde medianoche. */
 function fmtMin(m: number): string {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -81,8 +99,10 @@ export default function AgendaPage() {
   const [newTime, setNewTime] = useState<string | null>(null); // hora precargada al tocar un slot
   const [detail, setDetail] = useState<Appointment | null>(null);
 
-  const openNew = (time: string | null) => {
+  const [newResource, setNewResource] = useState<string | null>(null);
+  const openNew = (time: string | null, resourceId: string | null = null) => {
     setNewTime(time);
+    setNewResource(resourceId);
     setDialogOpen(true);
   };
 
@@ -100,6 +120,41 @@ export default function AgendaPage() {
   });
   const { data: settings } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
   const slotStepMin = settings?.slotStepMin ?? 15;
+  // Una columna por cancha/profesional. Las referencias del mapa (bar, entrada)
+  // no se reservan, así que no tienen columna.
+  const { data: allResources } = useQuery({ queryKey: ['resources'], queryFn: listResources });
+  const bookable = (allResources ?? []).filter((r) => r.active && !r.reference);
+  // null = ver todas. Si filtran por una, queda esa sola columna.
+  const [onlyResource, setOnlyResource] = useState<string | null>(null);
+  const columns = onlyResource ? bookable.filter((r) => r.id === onlyResource) : bookable;
+
+  // Clases de los profesores: ocupan la cancha aunque no sean una reserva, así
+  // que tienen que verse en la agenda o el club cree que está libre.
+  const { data: instructors } = useQuery({ queryKey: ['instructors'], queryFn: listInstructors });
+  const classes = useMemo(() => {
+    const [y, mo, d] = date.split('-').map(Number) as [number, number, number];
+    const dow = new Date(y, mo - 1, d).getDay();
+    const out: ClassBlock[] = [];
+    for (const prof of instructors ?? []) {
+      if (!prof.active) continue;
+      for (const sl of prof.slots) {
+        // Una franja sin cancha ocupa todas: se dibuja en cada columna.
+        const targets = sl.resourceId ? [sl.resourceId] : bookable.map((r) => r.id);
+        for (const rid of targets) {
+          if (!slotAppliesTo(sl, rid, dow, date)) continue;
+          out.push({
+            id: `${sl.id}-${rid}`,
+            resourceId: rid,
+            startMin: hhmmToMin(sl.startTime),
+            endMin: hhmmToMin(sl.endTime),
+            instructor: prof.name,
+            label: sl.label,
+          });
+        }
+      }
+    }
+    return out;
+  }, [instructors, date, bookable]);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['appointments'] });
 
@@ -121,7 +176,7 @@ export default function AgendaPage() {
   const list = (appts ?? []).filter((a) => a.status !== 'CANCELLED');
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Agenda</h1>
         {canWrite && (
@@ -152,6 +207,29 @@ export default function AgendaPage() {
         </Button>
       </div>
 
+      {/* Filtro: por defecto se ven todas; sirve para aislar una y verla sola. */}
+      {bookable.length > 1 && (
+        <div className="flex flex-wrap gap-1.5">
+          <Button
+            size="sm"
+            variant={onlyResource === null ? 'default' : 'outline'}
+            onClick={() => setOnlyResource(null)}
+          >
+            Todas
+          </Button>
+          {bookable.map((r) => (
+            <Button
+              key={r.id}
+              size="sm"
+              variant={onlyResource === r.id ? 'default' : 'outline'}
+              onClick={() => setOnlyResource(r.id === onlyResource ? null : r.id)}
+            >
+              {r.name}
+            </Button>
+          ))}
+        </div>
+      )}
+
       {isLoading ? (
         <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>
       ) : (
@@ -166,11 +244,13 @@ export default function AgendaPage() {
           <DayGrid
             date={date}
             appts={list}
+            classes={classes}
+            columns={columns}
             slotStepMin={slotStepMin}
             nowMs={nowMs}
             canWrite={canWrite}
             onOpen={setDetail}
-            onSlotClick={(m) => openNew(fmtMin(m))}
+            onSlotClick={(m, resourceId) => openNew(fmtMin(m), resourceId)}
           />
         </div>
       )}
@@ -180,6 +260,7 @@ export default function AgendaPage() {
         onOpenChange={setDialogOpen}
         defaultDate={date}
         defaultTime={newTime ?? undefined}
+        defaultResourceId={newResource}
         onCreated={invalidate}
       />
 
@@ -253,6 +334,8 @@ function layoutAppts(appts: Appointment[]): Placed[] {
 function DayGrid({
   date,
   appts,
+  classes,
+  columns,
   slotStepMin,
   nowMs,
   canWrite,
@@ -261,11 +344,15 @@ function DayGrid({
 }: {
   date: string;
   appts: Appointment[];
+  /** Clases de profesores que ocupan la cancha ese día. */
+  classes: ClassBlock[];
+  /** Una columna por cancha/profesional, en orden. */
+  columns: { id: string; name: string; color: string | null }[];
   slotStepMin: number;
   nowMs: number;
   canWrite: boolean;
   onOpen: (a: Appointment) => void;
-  onSlotClick: (minutes: number) => void;
+  onSlotClick: (minutes: number, resourceId: string | null) => void;
 }) {
   const step = Math.max(5, slotStepMin);
   const pxPerMin = CELL_PX / step;
@@ -282,6 +369,12 @@ function DayGrid({
     winStart = Math.min(winStart, minutesOfIso(a.startAt));
     winEnd = Math.max(winEnd, minutesOfIso(a.endAt));
   }
+  // Las clases también entran en la ventana: si hay una a las 21:00, esa hora
+  // tiene que verse aunque no haya ningún turno.
+  for (const c of classes) {
+    winStart = Math.min(winStart, c.startMin);
+    winEnd = Math.max(winEnd, c.endMin);
+  }
   if (isToday) {
     winStart = Math.min(winStart, nowMin);
     winEnd = Math.max(winEnd, nowMin + 30);
@@ -297,13 +390,31 @@ function DayGrid({
 
   return (
     <div
-      className="overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] [scrollbar-gutter:stable]"
-      style={{ maxHeight: 'calc(100vh - 230px)' }}
+      className="overflow-auto rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] [scrollbar-gutter:stable]"
+      style={{ maxHeight: 'calc(100vh - 260px)' }}
     >
+      {/* Encabezado: qué cancha es cada columna. Sticky para no perderlo al
+          scrollear un día largo. */}
+      <div className="sticky top-0 z-30 flex border-b border-[var(--color-border)] bg-[var(--color-card)]">
+        <div className="w-14 shrink-0 border-r border-[var(--color-border)]" />
+        {columns.map((col) => (
+          <div
+            key={col.id}
+            className="flex min-w-[150px] flex-1 items-center gap-1.5 border-r border-[var(--color-border)] px-2 py-2 last:border-r-0"
+          >
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ background: col.color || 'var(--color-primary)' }}
+            />
+            <span className="truncate text-xs font-medium">{col.name}</span>
+          </div>
+        ))}
+      </div>
+
       {/* py-3: aire arriba/abajo para que la primera y última etiqueta no se corten */}
       <div className="flex py-3">
         {/* Columna de horas (incluye la hora de cierre al final) */}
-        <div className="w-14 shrink-0 border-r border-[var(--color-border)]">
+        <div className="sticky left-0 z-10 w-14 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-card)]">
           {cells.map((m) => (
             <div key={m} style={{ height: CELL_PX }} className="relative">
               <span className="absolute -top-1.5 right-1.5 text-[11px] tabular-nums text-[var(--color-muted-foreground)]">
@@ -319,57 +430,87 @@ function DayGrid({
           </div>
         </div>
 
-        {/* Área de turnos */}
-        <div className="relative flex-1" style={{ height: gridH }}>
-          {/* Celdas del intervalo: cada una es una "fila" clickeable para agregar
-              un turno a esa hora. El hover la resalta y muestra el "+ turno". */}
-          {cells.map((m, i) => (
-            <button
-              key={m}
-              type="button"
-              disabled={!canWrite}
-              onClick={() => onSlotClick(m)}
-              style={{ top: i * CELL_PX, height: CELL_PX }}
-              className={`group absolute inset-x-0 flex items-center gap-1.5 border-t px-2 text-left transition-colors ${
-                m % 60 === 0 ? 'border-[var(--color-border)]' : 'border-[var(--color-border)]/40'
-              } ${canWrite ? 'cursor-pointer hover:bg-[var(--color-accent)]/50' : 'cursor-default'}`}
-            >
-              {canWrite && (
-                <span className="pointer-events-none flex items-center gap-1 text-xs font-medium text-[var(--color-primary)] opacity-0 transition-opacity group-hover:opacity-100">
-                  <Plus className="h-3.5 w-3.5" /> Agregar turno a las {fmtMin(m)}
-                </span>
-              )}
-            </button>
-          ))}
-
-          {/* Línea de cierre (borde inferior de la grilla) */}
-          <div className="absolute inset-x-0 border-t border-[var(--color-border)]" style={{ top: gridH }} />
-
-          {/* Línea de "ahora" */}
-          {isToday && nowMin >= winStart && nowMin <= winEnd && (
+        {/* Un área por cancha: la columna es SIEMPRE la misma cancha, así se ve
+            de un vistazo cuál está libre a cada hora. */}
+        {columns.map((col) => {
+          // Turnos de esta cancha. Si dos se pisan (no debería, pero puede pasar
+          // con solapamientos parciales), se reparten dentro de su columna.
+          const placed = layoutAppts(appts.filter((a) => a.resource.id === col.id));
+          return (
             <div
-              className="pointer-events-none absolute inset-x-0 z-20 flex items-center"
-              style={{ top: (nowMin - winStart) * pxPerMin }}
+              key={col.id}
+              className="relative min-w-[150px] flex-1 border-r border-[var(--color-border)] last:border-r-0"
+              style={{ height: gridH }}
             >
-              <div className="-ml-1 h-2 w-2 rounded-full bg-[var(--color-destructive)]" />
-              <div className="h-px flex-1 bg-[var(--color-destructive)]" />
+              {cells.map((m, i) => (
+                <button
+                  key={m}
+                  type="button"
+                  disabled={!canWrite}
+                  onClick={() => onSlotClick(m, col.id)}
+                  style={{ top: i * CELL_PX, height: CELL_PX }}
+                  className={`group absolute inset-x-0 flex items-center gap-1.5 border-t px-2 text-left transition-colors ${
+                    m % 60 === 0 ? 'border-[var(--color-border)]' : 'border-[var(--color-border)]/40'
+                  } ${canWrite ? 'cursor-pointer hover:bg-[var(--color-accent)]/50' : 'cursor-default'}`}
+                >
+                  {canWrite && (
+                    <span className="pointer-events-none truncate text-xs font-medium text-[var(--color-primary)] opacity-0 transition-opacity group-hover:opacity-100">
+                      <Plus className="mr-0.5 inline h-3.5 w-3.5" />
+                      {fmtMin(m)}
+                    </span>
+                  )}
+                </button>
+              ))}
+
+              {/* Línea de cierre */}
+              <div className="absolute inset-x-0 border-t border-[var(--color-border)]" style={{ top: gridH }} />
+
+              {/* Línea de "ahora" */}
+              {isToday && nowMin >= winStart && nowMin <= winEnd && (
+                <div
+                  className="pointer-events-none absolute inset-x-0 z-20 flex items-center"
+                  style={{ top: (nowMin - winStart) * pxPerMin }}
+                >
+                  <div className="h-px flex-1 bg-[var(--color-destructive)]" />
+                </div>
+              )}
+
+              {/* Clases del profe: van DEBAJO de los turnos (z menor) y sin
+                  click, porque no son una reserva. */}
+              {classes
+                .filter((c) => c.resourceId === col.id)
+                .map((c) => (
+                  <div
+                    key={c.id}
+                    className="pointer-events-none absolute inset-x-0.5 z-0 overflow-hidden rounded-[var(--radius)] border border-dashed border-[var(--color-muted-foreground)]/50 bg-[var(--color-muted)]/50 px-1.5 py-1"
+                    style={{
+                      top: (c.startMin - winStart) * pxPerMin,
+                      height: Math.max(20, (c.endMin - c.startMin) * pxPerMin),
+                    }}
+                  >
+                    <p className="truncate text-[11px] font-medium text-[var(--color-muted-foreground)]">
+                      {c.label || 'Clase'}
+                    </p>
+                    <p className="truncate text-[11px] text-[var(--color-muted-foreground)]">
+                      {c.instructor}
+                    </p>
+                  </div>
+                ))}
+
+              {placed.map(({ a, s: st, e, col: c, cols }) => (
+                <AppointmentBlock
+                  key={a.id}
+                  appt={a}
+                  top={(st - winStart) * pxPerMin}
+                  height={Math.max(20, (e - st) * pxPerMin)}
+                  leftPct={(c / cols) * 100}
+                  widthPct={(1 / cols) * 100}
+                  onOpen={() => onOpen(a)}
+                />
+              ))}
             </div>
-          )}
-
-          {/* Bloques de turnos (los bloques van encima de las celdas clickeables) */}
-          {placed.map(({ a, s, e, col, cols }) => (
-            <AppointmentBlock
-              key={a.id}
-              appt={a}
-              top={(s - winStart) * pxPerMin}
-              height={Math.max(20, (e - s) * pxPerMin)}
-              leftPct={(col / cols) * 100}
-              widthPct={(1 / cols) * 100}
-              onOpen={() => onOpen(a)}
-            />
-          ))}
-
-        </div>
+          );
+        })}
       </div>
     </div>
   );

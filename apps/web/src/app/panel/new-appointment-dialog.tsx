@@ -52,11 +52,14 @@ export function NewAppointmentDialog({
   onOpenChange,
   defaultDate,
   defaultTime,
+  defaultResourceId,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   defaultDate: string;
+  /** Cancha/profesional precargado (al tocar un slot de esa columna). */
+  defaultResourceId?: string | null;
   /** Hora 'HH:MM' precargada (al tocar un slot en la agenda). */
   defaultTime?: string;
   onCreated: () => void;
@@ -104,7 +107,8 @@ export function NewAppointmentDialog({
   useEffect(() => {
     if (open) {
       setServiceId('');
-      setResourceId('');
+      // Si vino de tocar una columna de la agenda, ya sabemos la cancha.
+      setResourceId(defaultResourceId ?? '');
       setDate(defaultDate);
       setSlot(null);
       setCustomer(null);
@@ -113,7 +117,7 @@ export function NewAppointmentDialog({
         { firstName: '', lastName: '', categoryId: null },
       ]);
     }
-  }, [open, defaultDate]);
+  }, [open, defaultDate, defaultResourceId]);
 
   // Al cambiar servicio/recurso/fecha, se invalida el slot elegido.
   useEffect(() => {
@@ -148,9 +152,9 @@ export function NewAppointmentDialog({
     const s0 = activeServices[0];
     const r0 = activeResources[0];
     if (activeServices.length === 1 && s0) setServiceId(s0.id);
-    if (activeResources.length === 1 && r0) setResourceId(r0.id);
+    if (!defaultResourceId && activeResources.length === 1 && r0) setResourceId(r0.id);
     autoPicked.current = true;
-  }, [open, services, resources, activeServices, activeResources]);
+  }, [open, services, resources, activeServices, activeResources, defaultResourceId]);
   const resourceName = useMemo(() => {
     const map = new Map(activeResources.map((r) => [r.id, r.name]));
     return (id: string) => map.get(id) ?? '';
