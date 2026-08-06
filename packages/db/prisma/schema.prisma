@@ -299,6 +299,9 @@ model InstructorSlotException {
   /// Null = como siempre.
   startTime  String?  @map("start_time")
   endTime    String?  @map("end_time")
+  /// Tramos de ese día: [{ from: 'HH:MM', to: 'HH:MM' }]. Permite partir la
+  /// clase (13–15 y 16–20) y dejar el hueco libre para reservar.
+  ranges     Json?
   resourceId String?  @map("resource_id") @db.Uuid
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")

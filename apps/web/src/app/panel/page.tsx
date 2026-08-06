@@ -15,7 +15,7 @@ import {
   Package,
   Repeat,
 } from 'lucide-react';
-import { resolveClassFor, type AppointmentStatusValue } from '@soytuturno/shared';
+import { resolveClassFor, type ClassRange, type AppointmentStatusValue } from '@soytuturno/shared';
 import {
   listAppointments,
   cancelAppointment,
@@ -78,6 +78,8 @@ type ClassBlock = {
   resourceId: string;
   /** Cancha configurada para ese día (null = ocupa todas). */
   baseResourceId: string | null;
+  /** Todos los tramos de la clase ese día (uno solo = clase corrida). */
+  baseRanges: ClassRange[];
   startMin: number;
   endMin: number;
   instructor: string;
@@ -182,16 +184,19 @@ export default function AgendaPage() {
         // Una franja sin cancha ocupa todas: se dibuja en cada columna.
         const targets = eff.resourceId ? [eff.resourceId] : bookable.map((r) => r.id);
         for (const rid of targets) {
-          out.push({
-            id: `${sl.id}-${rid}`,
-            slotId: sl.id,
-            resourceId: rid,
-            baseResourceId: eff.resourceId,
-            startMin: hhmmToMin(eff.startTime),
-            endMin: hhmmToMin(eff.endTime),
-            instructor: prof.name,
-            label: sl.label,
-            moved: !!ex && !ex.cancelled,
+          eff.ranges.forEach((r, i) => {
+            out.push({
+              id: `${sl.id}-${rid}-${i}`,
+              slotId: sl.id,
+              resourceId: rid,
+              baseResourceId: eff.resourceId,
+              baseRanges: eff.ranges,
+              startMin: hhmmToMin(r.from),
+              endMin: hhmmToMin(r.to),
+              instructor: prof.name,
+              label: sl.label,
+              moved: !!ex && !ex.cancelled,
+            });
           });
         }
       }
@@ -849,23 +854,40 @@ function ClassDayDialog({
   const { data: resources } = useQuery({ queryKey: ['resources'], queryFn: listResources });
   const bookable = (resources ?? []).filter((r) => r.active && !r.reference);
 
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  // La clase de ese día son uno o más tramos. Con varios, los huecos del medio
+  // quedan libres para reservar.
+  const [tramos, setTramos] = useState<ClassRange[]>([]);
   const [resourceId, setResourceId] = useState('');
   useEffect(() => {
     if (!clase) return;
-    setFrom(fmtMin(clase.startMin));
-    setTo(fmtMin(clase.endMin));
+    setTramos(clase.baseRanges.map((r) => ({ ...r })));
     setResourceId(clase.baseResourceId ?? '');
   }, [clase]);
+
+  const setTramo = (i: number, patch: Partial<ClassRange>) =>
+    setTramos((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+  const quitarTramo = (i: number) => setTramos((prev) => prev.filter((_, idx) => idx !== i));
+  const agregarTramo = () =>
+    setTramos((prev) => {
+      const ultimo = prev[prev.length - 1];
+      // Arranca una hora después del último, para no pisarlo.
+      const desde = ultimo ? fmtMin(Math.min(hhmmToMin(ultimo.to) + 60, 23 * 60)) : '18:00';
+      return [...prev, { from: desde, to: fmtMin(Math.min(hhmmToMin(desde) + 60, 23 * 60 + 59)) }];
+    });
+
+  const tramosOk =
+    tramos.length > 0 &&
+    tramos.every((t) => t.from && t.to && t.from < t.to) &&
+    [...tramos]
+      .sort((a, b) => a.from.localeCompare(b.from))
+      .every((t, i, arr) => i === 0 || arr[i - 1]!.to <= t.from);
 
   const save = useMutation({
     mutationFn: (suspender: boolean) =>
       setSlotException(clase!.slotId, {
         date,
         cancelled: suspender,
-        startTime: suspender ? null : from,
-        endTime: suspender ? null : to,
+        ranges: suspender ? null : tramos,
         resourceId: suspender ? null : resourceId || null,
       }),
     onSuccess: (_, suspender) => {
@@ -898,27 +920,69 @@ function ClassDayDialog({
             </DialogHeader>
 
             <div className="space-y-3">
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="flex flex-col gap-1">
-                  <Label className="text-[10px] text-[var(--color-muted-foreground)]">Desde</Label>
-                  <Input
-                    type="time"
-                    value={from}
-                    onChange={(e) => setFrom(e.target.value)}
-                    disabled={!canWrite}
-                    className="w-[9.5rem] px-2"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <Label className="text-[10px] text-[var(--color-muted-foreground)]">Hasta</Label>
-                  <Input
-                    type="time"
-                    value={to}
-                    onChange={(e) => setTo(e.target.value)}
-                    disabled={!canWrite}
-                    className="w-[9.5rem] px-2"
-                  />
-                </div>
+              <div className="space-y-2">
+                {tramos.map((t, i) => (
+                  <div key={i} className="flex flex-wrap items-end gap-2">
+                    <div className="flex flex-col gap-1">
+                      {i === 0 && (
+                        <Label className="text-[10px] text-[var(--color-muted-foreground)]">
+                          Desde
+                        </Label>
+                      )}
+                      <Input
+                        type="time"
+                        value={t.from}
+                        onChange={(e) => setTramo(i, { from: e.target.value })}
+                        disabled={!canWrite}
+                        className="w-[9.5rem] px-2"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {i === 0 && (
+                        <Label className="text-[10px] text-[var(--color-muted-foreground)]">
+                          Hasta
+                        </Label>
+                      )}
+                      <Input
+                        type="time"
+                        value={t.to}
+                        onChange={(e) => setTramo(i, { to: e.target.value })}
+                        disabled={!canWrite}
+                        className="w-[9.5rem] px-2"
+                      />
+                    </div>
+                    {canWrite && tramos.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => quitarTramo(i)}
+                        title="Quitar este tramo"
+                        className="mb-1 rounded p-1 text-[var(--color-muted-foreground)] hover:text-[var(--color-destructive)]"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {canWrite && tramos.length < 6 && (
+                  <button
+                    type="button"
+                    onClick={agregarTramo}
+                    className="text-xs text-[var(--color-primary)] hover:underline"
+                  >
+                    + Cortar la clase en otro tramo
+                  </button>
+                )}
+                {tramos.length > 1 && (
+                  <p className="text-[11px] text-[var(--color-muted-foreground)]">
+                    Los huecos entre tramos quedan libres para reservar.
+                  </p>
+                )}
+                {!tramosOk && (
+                  <p className="text-[11px] text-[var(--color-destructive)]">
+                    Revisá los horarios: cada tramo tiene que terminar después de empezar y no
+                    pisarse con otro.
+                  </p>
+                )}
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-[10px] text-[var(--color-muted-foreground)]">Cancha</Label>
@@ -959,7 +1023,7 @@ function ClassDayDialog({
                 >
                   No hay clase ese día
                 </Button>
-                <Button onClick={() => save.mutate(false)} disabled={save.isPending || !from || !to}>
+                <Button onClick={() => save.mutate(false)} disabled={save.isPending || !tramosOk}>
                   {save.isPending ? 'Guardando…' : 'Guardar solo ese día'}
                 </Button>
               </DialogFooter>

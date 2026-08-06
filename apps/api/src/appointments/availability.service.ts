@@ -16,6 +16,16 @@ export type Slot = { startAt: string; endAt: string; resourceId: string };
 
 type HourRange = { from: string; to: string };
 
+/** Los tramos de una excepción vienen de una columna JSON. */
+function readRanges(value: unknown): HourRange[] | null {
+  if (!Array.isArray(value)) return null;
+  const out = value.filter(
+    (r): r is HourRange =>
+      !!r && typeof r === 'object' && typeof (r as HourRange).from === 'string' && typeof (r as HourRange).to === 'string',
+  );
+  return out.length ? out : null;
+}
+
 /** Config de turnos leída del tenant (con defaults sanos). */
 function readTurnoConfig(turnoConfig: unknown) {
   const cfg = (turnoConfig && typeof turnoConfig === 'object' ? turnoConfig : {}) as Record<string, unknown>;
@@ -120,10 +130,16 @@ export class AvailabilityService {
           endTime: true,
           startsOn: true,
           endsOn: true,
-          // Lo que cambia ESE día: movida de horario/cancha, o suspendida.
+          // Lo que cambia ESE día: horarios/cancha, partida en tramos, o suspendida.
           exceptions: {
             where: { date: new Date(`${query.date}T00:00:00Z`) },
-            select: { cancelled: true, startTime: true, endTime: true, resourceId: true },
+            select: {
+              cancelled: true,
+              startTime: true,
+              endTime: true,
+              ranges: true,
+              resourceId: true,
+            },
           },
         },
       })
@@ -132,10 +148,15 @@ export class AvailabilityService {
         const ex = s.exceptions[0];
         // Suspendida ese día: la cancha queda libre.
         if (ex?.cancelled) return null;
+        // Tramos de ese día: si está partida (13–15 y 16–20), el hueco del
+        // medio no ocupa la cancha y se puede reservar.
+        const tramos = readRanges(ex?.ranges);
+        const ranges: HourRange[] = tramos
+          ? tramos.map((r) => ({ from: r.from, to: r.to }))
+          : [{ from: ex?.startTime ?? s.startTime, to: ex?.endTime ?? s.endTime }];
         return {
           resourceId: ex?.resourceId ?? s.resourceId,
-          startTime: ex?.startTime ?? s.startTime,
-          endTime: ex?.endTime ?? s.endTime,
+          ranges,
           startsOn: s.startsOn,
           endsOn: s.endsOn,
         };
@@ -183,10 +204,12 @@ export class AvailabilityService {
       // Las clases de este recurso (y las que ocupan todas) valen como ocupado.
       const classIntervals = classSlots
         .filter((s) => s.resourceId === null || s.resourceId === resourceId)
-        .map((s) => ({
-          start: wallTimeToUtc(query.date, hhmmToMinutes(s.startTime), tz).getTime(),
-          end: wallTimeToUtc(query.date, hhmmToMinutes(s.endTime), tz).getTime(),
-        }));
+        .flatMap((s) =>
+          s.ranges.map((r) => ({
+            start: wallTimeToUtc(query.date, hhmmToMinutes(r.from), tz).getTime(),
+            end: wallTimeToUtc(query.date, hhmmToMinutes(r.to), tz).getTime(),
+          })),
+        );
 
       const busy = [...(busyByResource.get(resourceId) ?? []), ...classIntervals];
       const ranges = rangesByResource.get(resourceId) ?? [];

@@ -403,6 +403,13 @@ export const instructorSlotSchema = z
 export type InstructorSlotInput = z.infer<typeof instructorSlotSchema>;
 
 /** Lo que cambia de una clase solo para una fecha. */
+/** Un tramo de clase dentro del día. */
+export const classRangeSchema = z.object({
+  from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:MM)'),
+  to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:MM)'),
+});
+export type ClassRange = z.infer<typeof classRangeSchema>;
+
 export const slotExceptionSchema = z
   .object({
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida'),
@@ -412,6 +419,23 @@ export const slotExceptionSchema = z
     startTime: z
       .string()
       .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:MM)')
+      .nullable()
+      .optional(),
+    /**
+     * Tramos de ese día. Uno solo = la clase corrida; varios = partida, y los
+     * huecos del medio quedan libres para reservar. Null = como siempre.
+     */
+    ranges: z
+      .array(classRangeSchema)
+      .max(6, 'Como mucho 6 tramos')
+      .refine(
+        (rs) => rs.every((r) => r.from < r.to),
+        'Cada tramo tiene que terminar después de empezar',
+      )
+      .refine((rs) => {
+        const sorted = [...rs].sort((a, b) => a.from.localeCompare(b.from));
+        return sorted.every((r, i) => i === 0 || sorted[i - 1]!.to <= r.from);
+      }, 'Los tramos no se pueden pisar')
       .nullable()
       .optional(),
     endTime: z
@@ -434,6 +458,7 @@ export type SlotException = {
   cancelled: boolean;
   startTime: string | null;
   endTime: string | null;
+  ranges: ClassRange[] | null;
   resourceId: string | null;
 };
 
@@ -475,19 +500,28 @@ export function resolveClassFor(
   slot: Pick<InstructorSlot, 'id' | 'resourceId' | 'dayOfWeek' | 'startTime' | 'endTime' | 'startsOn' | 'endsOn' | 'active'>,
   ymd: string,
   dayOfWeek: number,
-  exception?: Pick<SlotException, 'cancelled' | 'startTime' | 'endTime' | 'resourceId'> | null,
-): { resourceId: string | null; startTime: string; endTime: string } | null {
+  exception?: Pick<
+    SlotException,
+    'cancelled' | 'startTime' | 'endTime' | 'ranges' | 'resourceId'
+  > | null,
+): { resourceId: string | null; ranges: ClassRange[] } | null {
   if (!slot.active) return null;
   if (slot.dayOfWeek !== dayOfWeek) return null;
   if (slot.startsOn && ymd < slot.startsOn) return null;
   if (slot.endsOn && ymd > slot.endsOn) return null;
   // Suspendida ese día: la cancha queda libre.
   if (exception?.cancelled) return null;
-  return {
-    resourceId: exception?.resourceId ?? slot.resourceId,
-    startTime: exception?.startTime ?? slot.startTime,
-    endTime: exception?.endTime ?? slot.endTime,
-  };
+
+  // Prioridad: tramos de ese día → horario movido de ese día → como siempre.
+  let ranges: ClassRange[];
+  if (exception?.ranges?.length) {
+    ranges = [...exception.ranges].sort((a, b) => a.from.localeCompare(b.from));
+  } else if (exception?.startTime && exception.endTime) {
+    ranges = [{ from: exception.startTime, to: exception.endTime }];
+  } else {
+    ranges = [{ from: slot.startTime, to: slot.endTime }];
+  }
+  return { resourceId: exception?.resourceId ?? slot.resourceId, ranges };
 }
 
 export function slotAppliesTo(

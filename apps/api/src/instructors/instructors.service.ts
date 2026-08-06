@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@soytuturno/db';
 import type {
+  ClassRange,
   CreateInstructorInput,
   UpdateInstructorInput,
   InstructorSlotInput,
@@ -20,6 +22,15 @@ function startOfToday(): Date {
 }
 /** 'YYYY-MM-DD' → Date UTC a medianoche (para columnas DATE). */
 const toDate = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null);
+/** Los tramos vienen de una columna JSON: los leemos con cuidado. */
+function readRanges(value: unknown): ClassRange[] | null {
+  if (!Array.isArray(value)) return null;
+  const out = value.filter(
+    (r): r is ClassRange =>
+      !!r && typeof r === 'object' && typeof (r as ClassRange).from === 'string' && typeof (r as ClassRange).to === 'string',
+  );
+  return out.length ? out : null;
+}
 
 /**
  * Profesores del club y sus horarios de clase. No son recursos reservables: sus
@@ -67,6 +78,7 @@ export class InstructorsService {
             cancelled: e.cancelled,
             startTime: e.startTime,
             endTime: e.endTime,
+            ranges: readRanges(e.ranges),
             resourceId: e.resourceId,
           })),
         })),
@@ -207,8 +219,14 @@ export class InstructorsService {
       await this.assertResource(tx, ctx.tenantId, input.resourceId);
 
       const date = toDate(input.date)!;
-      const sinCambios =
-        !input.cancelled && !input.startTime && !input.endTime && !input.resourceId;
+      // Guardar la clase tal cual está configurada no es una excepción: es la
+      // clase de siempre, así que en vez de anotar nada, borramos.
+      const tramos = (input.ranges ?? []).filter((r) => r.from && r.to);
+      const mismoHorario =
+        tramos.length <= 1 &&
+        (!tramos[0] || (tramos[0].from === slot.startTime && tramos[0].to === slot.endTime));
+      const mismaCancha = (input.resourceId ?? null) === slot.resourceId;
+      const sinCambios = !input.cancelled && mismoHorario && mismaCancha;
       if (sinCambios) {
         // Volver a "como siempre" es borrar la excepción.
         await tx.instructorSlotException.deleteMany({ where: { slotId, date } });
@@ -217,8 +235,10 @@ export class InstructorsService {
 
       const data = {
         cancelled: input.cancelled,
-        startTime: input.cancelled ? null : (input.startTime ?? null),
-        endTime: input.cancelled ? null : (input.endTime ?? null),
+        // Los tramos mandan; startTime/endTime quedan solo para lo viejo.
+        startTime: null,
+        endTime: null,
+        ranges: input.cancelled || !tramos.length ? Prisma.DbNull : tramos,
         resourceId: input.cancelled ? null : (input.resourceId ?? null),
       };
       const existing = await tx.instructorSlotException.findFirst({ where: { slotId, date } });
