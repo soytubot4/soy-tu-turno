@@ -6,6 +6,7 @@ import type {
   CreateInstructorInput,
   UpdateInstructorInput,
   InstructorSlotInput,
+  SlotExceptionInput,
   Instructor,
 } from '@soytuturno/shared';
 
@@ -41,3 +42,10 @@ export const updateInstructorSlot = (slotId: string, input: InstructorSlotInput)
 
 export const deleteInstructorSlot = (slotId: string) =>
   apiFetch<{ id: string }>(`/instructors/slots/${slotId}`, { method: 'DELETE', tenantSlug: slug() });
+
+/** Guarda (o limpia) lo que cambia de una clase para una fecha puntual. */
+export const setSlotException = (slotId: string, input: SlotExceptionInput) =>
+  apiFetch<{ slotId: string; date: string; cleared: boolean }>(
+    `/instructors/slots/${slotId}/exception`,
+    { method: 'PUT', body: input, tenantSlug: slug() },
+  );

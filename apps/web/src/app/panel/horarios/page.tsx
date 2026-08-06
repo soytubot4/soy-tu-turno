@@ -84,6 +84,8 @@ export default function HorariosPage() {
 
       {canSettings && canchas && <PlayerCategoriesCard />}
 
+      {canSettings && <RecurringToggleCard />}
+
       {canSettings && canchas && <LightSurchargeCard />}
 
       {canSchedule && (resources ?? []).length > 1 && (
@@ -303,6 +305,50 @@ function PlayersToggleCard() {
               className="h-4 w-4 accent-[var(--color-primary)]"
             />
             <span className="text-sm">Pedir datos de los jugadores al reservar</span>
+          </label>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Prende/apaga los turnos fijos (la cancha reservada todas las semanas). */
+function RecurringToggleCard() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const save = useMutation({
+    mutationFn: (v: boolean) => updateTurnoSettings({ recurringEnabled: v }),
+    onSuccess: () => {
+      toast.success('Guardado');
+      qc.invalidateQueries({ queryKey: ['turno-settings'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const on = data?.recurringEnabled ?? false;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Turnos fijos</CardTitle>
+        <CardDescription>
+          Para los que tienen la cancha reservada siempre a la misma hora. Si lo prendés, aparece la
+          sección <span className="font-medium">Turnos fijos</span> para cargarlos: se agendan solos
+          semana a semana y podés cancelar uno suelto si esa vez no vienen.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">Cargando…</p>
+        ) : (
+          <label className="flex cursor-pointer items-center gap-3">
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={(e) => save.mutate(e.target.checked)}
+              disabled={save.isPending}
+              className="h-4 w-4 accent-[var(--color-primary)]"
+            />
+            <span className="text-sm">Aceptar turnos fijos</span>
           </label>
         )}
       </CardContent>

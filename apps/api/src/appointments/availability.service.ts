@@ -120,16 +120,35 @@ export class AvailabilityService {
           endTime: true,
           startsOn: true,
           endsOn: true,
+          // Lo que cambia ESE día: movida de horario/cancha, o suspendida.
+          exceptions: {
+            where: { date: new Date(`${query.date}T00:00:00Z`) },
+            select: { cancelled: true, startTime: true, endTime: true, resourceId: true },
+          },
         },
       })
-    ).filter((s) => {
-      // Vigencia del ciclo de clases (inclusiva).
-      const from = s.startsOn ? s.startsOn.toISOString().slice(0, 10) : null;
-      const to = s.endsOn ? s.endsOn.toISOString().slice(0, 10) : null;
-      if (from && query.date < from) return false;
-      if (to && query.date > to) return false;
-      return true;
-    });
+    )
+      .map((s) => {
+        const ex = s.exceptions[0];
+        // Suspendida ese día: la cancha queda libre.
+        if (ex?.cancelled) return null;
+        return {
+          resourceId: ex?.resourceId ?? s.resourceId,
+          startTime: ex?.startTime ?? s.startTime,
+          endTime: ex?.endTime ?? s.endTime,
+          startsOn: s.startsOn,
+          endsOn: s.endsOn,
+        };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null)
+      .filter((s) => {
+        // Vigencia del ciclo de clases (inclusiva).
+        const from = s.startsOn ? s.startsOn.toISOString().slice(0, 10) : null;
+        const to = s.endsOn ? s.endsOn.toISOString().slice(0, 10) : null;
+        if (from && query.date < from) return false;
+        if (to && query.date > to) return false;
+        return true;
+      });
 
     // Turnos ya tomados ese día (no cancelados).
     const taken = await tx.appointment.findMany({

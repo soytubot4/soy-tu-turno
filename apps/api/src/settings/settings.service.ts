@@ -18,6 +18,8 @@ function readCfg(turnoConfig: unknown) {
     listedOnLanding: cfg.listedOnLanding !== false,
     // Los precios por persona viven en player_categories (uno por categoría).
     priceWeekendEnabled: cfg.priceWeekendEnabled === true,
+    // Turnos fijos (el socio tiene la cancha todas las semanas).
+    recurringEnabled: cfg.recurringEnabled === true,
     // Recargo por luz (monto fijo por turno, no por persona).
     lightEnabled: cfg.lightEnabled === true,
     lightFrom: typeof cfg.lightFrom === 'string' ? cfg.lightFrom : '19:00',
@@ -62,6 +64,7 @@ export class SettingsService {
       if (input.productsEnabled !== undefined) next.productsEnabled = input.productsEnabled;
       if (input.listedOnLanding !== undefined) next.listedOnLanding = input.listedOnLanding;
       if (input.priceWeekendEnabled !== undefined) next.priceWeekendEnabled = input.priceWeekendEnabled;
+      if (input.recurringEnabled !== undefined) next.recurringEnabled = input.recurringEnabled;
       if (input.lightEnabled !== undefined) next.lightEnabled = input.lightEnabled;
       if (input.lightFrom !== undefined) next.lightFrom = input.lightFrom;
       if (input.lightPrice !== undefined) next.lightPrice = input.lightPrice;

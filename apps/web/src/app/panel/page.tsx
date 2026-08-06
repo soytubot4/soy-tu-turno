@@ -1,10 +1,21 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChevronLeft, ChevronRight, Plus, X, Check, Users, Phone, MapPin, Package } from 'lucide-react';
-import { slotAppliesTo, type AppointmentStatusValue } from '@soytuturno/shared';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  X,
+  Check,
+  Users,
+  Phone,
+  MapPin,
+  Package,
+  Repeat,
+} from 'lucide-react';
+import { resolveClassFor, type AppointmentStatusValue } from '@soytuturno/shared';
 import {
   listAppointments,
   cancelAppointment,
@@ -13,14 +24,18 @@ import {
 } from '@/features/agenda/api';
 import { getTurnoSettings } from '@/features/horarios/settings-api';
 import { listResources } from '@/features/equipo/api';
-import { listInstructors } from '@/features/profesores/api';
+import { listInstructors, setSlotException } from '@/features/profesores/api';
+import { ensureRecurring } from '@/features/fijos/api';
 import { useMe } from '@/features/me/api';
 import { resourceLabel } from '@/lib/labels';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
+  DialogFooter,
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
@@ -58,11 +73,17 @@ function hhmmToMin(hhmm: string): number {
 /** Una clase de profesor dibujada en la agenda (no es un turno reservado). */
 type ClassBlock = {
   id: string;
+  /** La franja semanal de la que sale (para editar ese día puntual). */
+  slotId: string;
   resourceId: string;
+  /** Cancha configurada para ese día (null = ocupa todas). */
+  baseResourceId: string | null;
   startMin: number;
   endMin: number;
   instructor: string;
   label: string | null;
+  /** true si ese día tiene una excepción (se movió de horario o cancha). */
+  moved: boolean;
 };
 
 /** 'HH:MM' desde minutos desde medianoche. */
@@ -98,6 +119,8 @@ export default function AgendaPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newTime, setNewTime] = useState<string | null>(null); // hora precargada al tocar un slot
   const [detail, setDetail] = useState<Appointment | null>(null);
+  // Clase de un profe que se está editando para ESE día.
+  const [classDetail, setClassDetail] = useState<ClassBlock | null>(null);
 
   const [newResource, setNewResource] = useState<string | null>(null);
   const openNew = (time: string | null, resourceId: string | null = null) => {
@@ -105,6 +128,21 @@ export default function AgendaPage() {
     setNewResource(resourceId);
     setDialogOpen(true);
   };
+
+  // Turnos fijos: al abrir la agenda rellenamos los que falten generar, así se
+  // renuevan solos sin depender de un proceso aparte. Es idempotente; si no hay
+  // nada que crear no hace nada. Corre una sola vez por visita.
+  const { data: settings } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
+  const ensured = useRef(false);
+  useEffect(() => {
+    if (ensured.current || !settings?.recurringEnabled) return;
+    ensured.current = true;
+    ensureRecurring()
+      .then((r) => {
+        if (r.creados > 0) qc.invalidateQueries({ queryKey: ['appointments'] });
+      })
+      .catch(() => undefined); // si falla, la agenda funciona igual
+  }, [settings?.recurringEnabled, qc]);
 
   // Reloj para mover la línea de "ahora" (se actualiza cada minuto).
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -118,7 +156,6 @@ export default function AgendaPage() {
     queryKey: ['appointments', date],
     queryFn: () => listAppointments(from, to),
   });
-  const { data: settings } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
   const slotStepMin = settings?.slotStepMin ?? 15;
   // Una columna por cancha/profesional. Las referencias del mapa (bar, entrada)
   // no se reservan, así que no tienen columna.
@@ -138,17 +175,23 @@ export default function AgendaPage() {
     for (const prof of instructors ?? []) {
       if (!prof.active) continue;
       for (const sl of prof.slots) {
+        // Lo que cambia ESE día: movida de horario/cancha, o suspendida.
+        const ex = sl.exceptions.find((e) => e.date === date) ?? null;
+        const eff = resolveClassFor(sl, date, dow, ex);
+        if (!eff) continue; // no toca hoy, o está suspendida
         // Una franja sin cancha ocupa todas: se dibuja en cada columna.
-        const targets = sl.resourceId ? [sl.resourceId] : bookable.map((r) => r.id);
+        const targets = eff.resourceId ? [eff.resourceId] : bookable.map((r) => r.id);
         for (const rid of targets) {
-          if (!slotAppliesTo(sl, rid, dow, date)) continue;
           out.push({
             id: `${sl.id}-${rid}`,
+            slotId: sl.id,
             resourceId: rid,
-            startMin: hhmmToMin(sl.startTime),
-            endMin: hhmmToMin(sl.endTime),
+            baseResourceId: eff.resourceId,
+            startMin: hhmmToMin(eff.startTime),
+            endMin: hhmmToMin(eff.endTime),
             instructor: prof.name,
             label: sl.label,
+            moved: !!ex && !ex.cancelled,
           });
         }
       }
@@ -250,6 +293,7 @@ export default function AgendaPage() {
             nowMs={nowMs}
             canWrite={canWrite}
             onOpen={setDetail}
+            onOpenClass={setClassDetail}
             onSlotClick={(m, resourceId) => openNew(fmtMin(m), resourceId)}
           />
         </div>
@@ -262,6 +306,18 @@ export default function AgendaPage() {
         defaultTime={newTime ?? undefined}
         defaultResourceId={newResource}
         onCreated={invalidate}
+      />
+
+      <ClassDayDialog
+        clase={classDetail}
+        date={date}
+        canWrite={canWrite}
+        onClose={() => setClassDetail(null)}
+        onSaved={() => {
+          setClassDetail(null);
+          qc.invalidateQueries({ queryKey: ['instructors'] });
+          qc.invalidateQueries({ queryKey: ['availability'] });
+        }}
       />
 
       <AppointmentDetailDialog
@@ -340,6 +396,7 @@ function DayGrid({
   nowMs,
   canWrite,
   onOpen,
+  onOpenClass,
   onSlotClick,
 }: {
   date: string;
@@ -352,6 +409,7 @@ function DayGrid({
   nowMs: number;
   canWrite: boolean;
   onOpen: (a: Appointment) => void;
+  onOpenClass: (c: ClassBlock) => void;
   onSlotClick: (minutes: number, resourceId: string | null) => void;
 }) {
   const step = Math.max(5, slotStepMin);
@@ -436,31 +494,43 @@ function DayGrid({
           // Turnos de esta cancha. Si dos se pisan (no debería, pero puede pasar
           // con solapamientos parciales), se reparten dentro de su columna.
           const placed = layoutAppts(appts.filter((a) => a.resource.id === col.id));
+          const colClasses = classes.filter((c) => c.resourceId === col.id);
+          // Una celda tapada por una clase no se puede reservar: la cancha está
+          // ocupada. Sin esto el hover invitaba a agregar un turno ahí.
+          const enClase = (m: number) =>
+            colClasses.some((c) => m < c.endMin && m + step > c.startMin);
           return (
             <div
               key={col.id}
               className="relative min-w-[150px] flex-1 border-r border-[var(--color-border)] last:border-r-0"
               style={{ height: gridH }}
             >
-              {cells.map((m, i) => (
-                <button
-                  key={m}
-                  type="button"
-                  disabled={!canWrite}
-                  onClick={() => onSlotClick(m, col.id)}
-                  style={{ top: i * CELL_PX, height: CELL_PX }}
-                  className={`group absolute inset-x-0 flex items-center gap-1.5 border-t px-2 text-left transition-colors ${
-                    m % 60 === 0 ? 'border-[var(--color-border)]' : 'border-[var(--color-border)]/40'
-                  } ${canWrite ? 'cursor-pointer hover:bg-[var(--color-accent)]/50' : 'cursor-default'}`}
-                >
-                  {canWrite && (
-                    <span className="pointer-events-none truncate text-xs font-medium text-[var(--color-primary)] opacity-0 transition-opacity group-hover:opacity-100">
-                      <Plus className="mr-0.5 inline h-3.5 w-3.5" />
-                      {fmtMin(m)}
-                    </span>
-                  )}
-                </button>
-              ))}
+              {cells.map((m, i) => {
+                const ocupada = enClase(m);
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={!canWrite || ocupada}
+                    onClick={() => onSlotClick(m, col.id)}
+                    style={{ top: i * CELL_PX, height: CELL_PX }}
+                    className={`group absolute inset-x-0 flex items-center gap-1.5 border-t px-2 text-left transition-colors ${
+                      m % 60 === 0 ? 'border-[var(--color-border)]' : 'border-[var(--color-border)]/40'
+                    } ${
+                      canWrite && !ocupada
+                        ? 'cursor-pointer hover:bg-[var(--color-accent)]/50'
+                        : 'cursor-default'
+                    }`}
+                  >
+                    {canWrite && !ocupada && (
+                      <span className="pointer-events-none truncate text-xs font-medium text-[var(--color-primary)] opacity-0 transition-opacity group-hover:opacity-100">
+                        <Plus className="mr-0.5 inline h-3.5 w-3.5" />
+                        {fmtMin(m)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
 
               {/* Línea de cierre */}
               <div className="absolute inset-x-0 border-t border-[var(--color-border)]" style={{ top: gridH }} />
@@ -480,21 +550,30 @@ function DayGrid({
               {classes
                 .filter((c) => c.resourceId === col.id)
                 .map((c) => (
-                  <div
+                  <button
                     key={c.id}
-                    className="pointer-events-none absolute inset-x-0.5 z-0 overflow-hidden rounded-[var(--radius)] border border-dashed border-[var(--color-muted-foreground)]/50 bg-[var(--color-muted)]/50 px-1.5 py-1"
+                    type="button"
+                    onClick={() => onOpenClass(c)}
+                    title="Tocá para cambiar esta clase solo este día"
+                    className="absolute inset-x-0 z-[5] overflow-hidden border-y border-[var(--color-border)] px-2 py-1 text-left transition-opacity hover:opacity-80"
                     style={{
                       top: (c.startMin - winStart) * pxPerMin,
                       height: Math.max(20, (c.endMin - c.startMin) * pxPerMin),
+                      // Rayado diagonal sobre fondo sólido: tapa las líneas de la
+                      // grilla y se lee como "acá no se puede reservar".
+                      backgroundColor: 'var(--color-card)',
+                      backgroundImage:
+                        'repeating-linear-gradient(45deg, var(--color-muted) 0 6px, transparent 6px 12px)',
                     }}
                   >
                     <p className="truncate text-[11px] font-medium text-[var(--color-muted-foreground)]">
-                      {c.label || 'Clase'}
+                      {fmtMin(c.startMin)}–{fmtMin(c.endMin)} · {c.label || 'Clase'}
                     </p>
                     <p className="truncate text-[11px] text-[var(--color-muted-foreground)]">
                       {c.instructor}
+                      {c.moved && ' · movida'}
                     </p>
-                  </div>
+                  </button>
                 ))}
 
               {placed.map(({ a, s: st, e, col: c, cols }) => (
@@ -547,8 +626,12 @@ function AppointmentBlock({
         borderLeft: accent ? `3px solid ${accent}` : undefined,
       }}
     >
-      <span className="truncate text-xs font-semibold">
-        {fmtTime(appt.startAt)} · {customerName(appt.customer)}
+      <span className="flex items-center gap-1 truncate text-xs font-semibold">
+        {/* El ícono marca que es un turno fijo (se repite todas las semanas). */}
+        {appt.recurringId && <Repeat className="h-3 w-3 shrink-0" aria-label="Turno fijo" />}
+        <span className="truncate">
+          {fmtTime(appt.startAt)} · {customerName(appt.customer)}
+        </span>
       </span>
       {height > 30 && (
         <span className="truncate text-[11px] opacity-80">
@@ -615,6 +698,9 @@ function AppointmentDetailDialog({
                 })} · ${fmtTime(appt.startAt)}–${fmtTime(appt.endAt)}`}
               />
               <DetailRow label="Servicio" value={appt.service.name} />
+              {appt.recurringId && (
+                <DetailRow label="Tipo" value="Turno fijo (se repite todas las semanas)" />
+              )}
               <div className="flex items-start justify-between gap-3">
                 <span className="shrink-0 text-[var(--color-muted-foreground)]">
                   {resourceLabel(canchas)}
@@ -735,6 +821,149 @@ function AppointmentDetailDialog({
                 </div>
               )}
             </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+/**
+ * Cambiar una clase SOLO para el día que se está viendo: moverla de horario o
+ * de cancha, o suspenderla. La clase semanal queda intacta.
+ */
+function ClassDayDialog({
+  clase,
+  date,
+  canWrite,
+  onClose,
+  onSaved,
+}: {
+  clase: ClassBlock | null;
+  date: string;
+  canWrite: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { data: resources } = useQuery({ queryKey: ['resources'], queryFn: listResources });
+  const bookable = (resources ?? []).filter((r) => r.active && !r.reference);
+
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [resourceId, setResourceId] = useState('');
+  useEffect(() => {
+    if (!clase) return;
+    setFrom(fmtMin(clase.startMin));
+    setTo(fmtMin(clase.endMin));
+    setResourceId(clase.baseResourceId ?? '');
+  }, [clase]);
+
+  const save = useMutation({
+    mutationFn: (suspender: boolean) =>
+      setSlotException(clase!.slotId, {
+        date,
+        cancelled: suspender,
+        startTime: suspender ? null : from,
+        endTime: suspender ? null : to,
+        resourceId: suspender ? null : resourceId || null,
+      }),
+    onSuccess: (_, suspender) => {
+      toast.success(suspender ? 'Ese día no hay clase' : 'Clase movida solo ese día');
+      onSaved();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const volver = useMutation({
+    mutationFn: () => setSlotException(clase!.slotId, { date, cancelled: false }),
+    onSuccess: () => {
+      toast.success('Vuelve al horario de siempre');
+      onSaved();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <Dialog open={!!clase} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        {clase && (
+          <>
+            <DialogHeader>
+              <DialogTitle>{clase.label || 'Clase'} · {clase.instructor}</DialogTitle>
+              <DialogDescription>
+                Los cambios valen solo para el {fmtLongDate(date)}. La clase de todas las semanas
+                queda como está.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label className="text-[10px] text-[var(--color-muted-foreground)]">Desde</Label>
+                  <Input
+                    type="time"
+                    value={from}
+                    onChange={(e) => setFrom(e.target.value)}
+                    disabled={!canWrite}
+                    className="w-[9.5rem] px-2"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-[10px] text-[var(--color-muted-foreground)]">Hasta</Label>
+                  <Input
+                    type="time"
+                    value={to}
+                    onChange={(e) => setTo(e.target.value)}
+                    disabled={!canWrite}
+                    className="w-[9.5rem] px-2"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-[10px] text-[var(--color-muted-foreground)]">Cancha</Label>
+                <select
+                  value={resourceId}
+                  onChange={(e) => setResourceId(e.target.value)}
+                  disabled={!canWrite}
+                  className="h-9 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-sm"
+                >
+                  <option value="">Todas</option>
+                  {bookable.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {clase.moved && (
+                <button
+                  type="button"
+                  onClick={() => volver.mutate()}
+                  disabled={!canWrite || volver.isPending}
+                  className="text-xs text-[var(--color-primary)] hover:underline"
+                >
+                  Volver al horario de siempre
+                </button>
+              )}
+            </div>
+
+            {canWrite && (
+              <DialogFooter className="gap-2">
+                <Button
+                  variant="ghost"
+                  className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
+                  onClick={() => save.mutate(true)}
+                  disabled={save.isPending}
+                >
+                  No hay clase ese día
+                </Button>
+                <Button onClick={() => save.mutate(false)} disabled={save.isPending || !from || !to}>
+                  {save.isPending ? 'Guardando…' : 'Guardar solo ese día'}
+                </Button>
+              </DialogFooter>
+            )}
           </>
         )}
       </DialogContent>

@@ -3,6 +3,7 @@ import type {
   CreateInstructorInput,
   UpdateInstructorInput,
   InstructorSlotInput,
+  SlotExceptionInput,
   Instructor,
 } from '@soytuturno/shared';
 import { PrismaService } from '@/prisma/prisma.service';
@@ -13,6 +14,10 @@ const assertCanWrite = () => assertCan('resources:write');
 
 /** 'YYYY-MM-DD' desde una columna DATE, sin correrse por timezone. */
 const dateOnly = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+/** Medianoche de hoy (para filtrar excepciones pasadas). */
+function startOfToday(): Date {
+  return new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+}
 /** 'YYYY-MM-DD' → Date UTC a medianoche (para columnas DATE). */
 const toDate = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null);
 
@@ -31,7 +36,11 @@ export class InstructorsService {
         where: { tenantId: ctx.tenantId },
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         include: {
-          slots: { orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }] },
+          slots: {
+            orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+            // Solo las de acá en adelante: las viejas no cambian nada.
+            include: { exceptions: { where: { date: { gte: startOfToday() } } } },
+          },
         },
       });
       return rows.map((r) => ({
@@ -51,6 +60,15 @@ export class InstructorsService {
           startsOn: dateOnly(s.startsOn),
           endsOn: dateOnly(s.endsOn),
           active: s.active,
+          exceptions: s.exceptions.map((e) => ({
+            id: e.id,
+            slotId: e.slotId,
+            date: dateOnly(e.date)!,
+            cancelled: e.cancelled,
+            startTime: e.startTime,
+            endTime: e.endTime,
+            resourceId: e.resourceId,
+          })),
         })),
       }));
     });
@@ -171,6 +189,47 @@ export class InstructorsService {
       if (!found) throw new NotFoundException('Horario no encontrado');
       await tx.instructorSlot.delete({ where: { id: slotId } });
       return { id: slotId };
+    });
+  }
+
+  /**
+   * Guarda lo que cambia de una clase SOLO para una fecha (se movió de horario
+   * o de cancha, o ese día no hay). Si no cambia nada, borra la excepción.
+   */
+  setException(slotId: string, input: SlotExceptionInput) {
+    assertCanWrite();
+    const ctx = requireTenantContext();
+    return this.prisma.tenantSafe(async (tx) => {
+      const slot = await tx.instructorSlot.findFirst({
+        where: { id: slotId, tenantId: ctx.tenantId },
+      });
+      if (!slot) throw new NotFoundException('Horario no encontrado');
+      await this.assertResource(tx, ctx.tenantId, input.resourceId);
+
+      const date = toDate(input.date)!;
+      const sinCambios =
+        !input.cancelled && !input.startTime && !input.endTime && !input.resourceId;
+      if (sinCambios) {
+        // Volver a "como siempre" es borrar la excepción.
+        await tx.instructorSlotException.deleteMany({ where: { slotId, date } });
+        return { slotId, date: input.date, cleared: true };
+      }
+
+      const data = {
+        cancelled: input.cancelled,
+        startTime: input.cancelled ? null : (input.startTime ?? null),
+        endTime: input.cancelled ? null : (input.endTime ?? null),
+        resourceId: input.cancelled ? null : (input.resourceId ?? null),
+      };
+      const existing = await tx.instructorSlotException.findFirst({ where: { slotId, date } });
+      if (existing) {
+        await tx.instructorSlotException.update({ where: { id: existing.id }, data });
+      } else {
+        await tx.instructorSlotException.create({
+          data: { tenantId: ctx.tenantId, slotId, date, ...data },
+        });
+      }
+      return { slotId, date: input.date, cleared: false };
     });
   }
 

@@ -11,6 +11,7 @@ import { PlayerCategoriesModule } from './player-categories/player-categories.mo
 import { ProductsModule } from './products/products.module';
 import { ResourcesModule } from './resources/resources.module';
 import { InstructorsModule } from './instructors/instructors.module';
+import { RecurringModule } from './recurring/recurring.module';
 import { BlocksModule } from './blocks/blocks.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { CustomersModule } from './customers/customers.module';
@@ -32,6 +33,7 @@ import { TeamModule } from './team/team.module';
     ProductsModule,
     ResourcesModule,
     InstructorsModule,
+    RecurringModule,
     BlocksModule,
     AppointmentsModule,
     CustomersModule,

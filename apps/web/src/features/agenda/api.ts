@@ -31,6 +31,8 @@ export type Appointment = {
         hasAbono?: boolean;
       }[]
     | null;
+  /** Si salió de un turno fijo, de qué regla. Null = turno suelto. */
+  recurringId: string | null;
   /** Productos reservados junto al turno. */
   products: { name: string; qty: number; price?: number | null }[] | null;
   customer: { id: string; firstName: string | null; lastName: string | null; phone: string | null };

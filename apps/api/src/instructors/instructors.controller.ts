@@ -1,11 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import {
   createInstructorSchema,
   updateInstructorSchema,
   instructorSlotSchema,
+  slotExceptionSchema,
   type CreateInstructorInput,
   type UpdateInstructorInput,
   type InstructorSlotInput,
+  type SlotExceptionInput,
 } from '@soytuturno/shared';
 import { InstructorsService } from './instructors.service';
 import { ZodValidationPipe } from '@/common/pipes/zod-validation.pipe';
@@ -52,6 +54,15 @@ export class InstructorsController {
     @Body(new ZodValidationPipe(instructorSlotSchema)) body: InstructorSlotInput,
   ) {
     return { ok: true, data: await this.service.updateSlot(slotId, body) };
+  }
+
+  /** Guarda (o limpia) lo que cambia de una clase para una fecha puntual. */
+  @Put('slots/:slotId/exception')
+  async setException(
+    @Param('slotId') slotId: string,
+    @Body(new ZodValidationPipe(slotExceptionSchema)) body: SlotExceptionInput,
+  ) {
+    return { ok: true, data: await this.service.setException(slotId, body) };
   }
 
   @Delete('slots/:slotId')

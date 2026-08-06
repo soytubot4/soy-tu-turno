@@ -14,6 +14,8 @@ export type TurnoSettings = {
   listedOnLanding: boolean;
   /** Si los precios de las categorías cambian los fines de semana. */
   priceWeekendEnabled: boolean;
+  /** Si el comercio usa turnos fijos (la cancha reservada todas las semanas). */
+  recurringEnabled: boolean;
   /** Recargo por luz: monto fijo del turno a partir de cierta hora. */
   lightEnabled: boolean;
   lightFrom: string; // 'HH:MM'

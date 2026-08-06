@@ -325,6 +325,46 @@ export const setResourceScheduleSchema = z.object({
 export type SetResourceScheduleInput = z.infer<typeof setResourceScheduleSchema>;
 
 // ─────────────────────────────────────────────────────────────
+// Turnos fijos (el socio tiene la cancha todas las semanas)
+// ─────────────────────────────────────────────────────────────
+export const createRecurringSchema = z
+  .object({
+    customerId: z.string().uuid(),
+    resourceId: z.string().uuid(),
+    serviceId: z.string().uuid(),
+    dayOfWeek: z.coerce.number().int().min(0).max(6),
+    startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:MM)'),
+    // Vigencia opcional. Sin `endsOn` se renueva hasta que lo den de baja.
+    startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    notes: z.string().trim().max(500).nullable().optional(),
+  })
+  .refine((v) => !v.startsOn || !v.endsOn || v.endsOn >= v.startsOn, {
+    message: 'La fecha hasta es anterior a la desde',
+    path: ['endsOn'],
+  });
+export type CreateRecurringInput = z.infer<typeof createRecurringSchema>;
+
+export type RecurringAppointment = {
+  id: string;
+  customerId: string;
+  customerName: string;
+  resourceId: string;
+  resourceName: string;
+  serviceId: string;
+  serviceName: string;
+  durationMin: number;
+  dayOfWeek: number;
+  startTime: string;
+  active: boolean;
+  startsOn: string | null;
+  endsOn: string | null;
+  /** Hasta qué fecha ya se generaron turnos. */
+  generatedUntil: string | null;
+  notes: string | null;
+};
+
+// ─────────────────────────────────────────────────────────────
 // Profesores y sus horarios de clase
 // ─────────────────────────────────────────────────────────────
 export const createInstructorSchema = z.object({
@@ -362,6 +402,41 @@ export const instructorSlotSchema = z
   });
 export type InstructorSlotInput = z.infer<typeof instructorSlotSchema>;
 
+/** Lo que cambia de una clase solo para una fecha. */
+export const slotExceptionSchema = z
+  .object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida'),
+    /** true = ese día no hay clase. */
+    cancelled: z.boolean().default(false),
+    /** Null = como siempre. */
+    startTime: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:MM)')
+      .nullable()
+      .optional(),
+    endTime: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:MM)')
+      .nullable()
+      .optional(),
+    resourceId: z.string().uuid().nullable().optional(),
+  })
+  .refine((v) => v.cancelled || !v.startTime || !v.endTime || v.endTime > v.startTime, {
+    message: 'El horario de fin tiene que ser posterior al de inicio',
+    path: ['endTime'],
+  });
+export type SlotExceptionInput = z.infer<typeof slotExceptionSchema>;
+
+export type SlotException = {
+  id: string;
+  slotId: string;
+  date: string;
+  cancelled: boolean;
+  startTime: string | null;
+  endTime: string | null;
+  resourceId: string | null;
+};
+
 export type InstructorSlot = {
   id: string;
   resourceId: string | null;
@@ -372,6 +447,8 @@ export type InstructorSlot = {
   startsOn: string | null;
   endsOn: string | null;
   active: boolean;
+  /** Lo que cambia en fechas puntuales (de hoy en adelante). */
+  exceptions: SlotException[];
 };
 
 export type Instructor = {
@@ -390,6 +467,29 @@ export type Instructor = {
  * Se usa para descontar las clases de los horarios que se ofrecen. Una franja
  * sin cancha ocupa todas. La vigencia (desde/hasta) es inclusiva.
  */
+/**
+ * Cómo queda una clase en una fecha concreta, aplicando la excepción de ese día
+ * si la hay. Devuelve null si ese día no va (no toca, o está suspendida).
+ */
+export function resolveClassFor(
+  slot: Pick<InstructorSlot, 'id' | 'resourceId' | 'dayOfWeek' | 'startTime' | 'endTime' | 'startsOn' | 'endsOn' | 'active'>,
+  ymd: string,
+  dayOfWeek: number,
+  exception?: Pick<SlotException, 'cancelled' | 'startTime' | 'endTime' | 'resourceId'> | null,
+): { resourceId: string | null; startTime: string; endTime: string } | null {
+  if (!slot.active) return null;
+  if (slot.dayOfWeek !== dayOfWeek) return null;
+  if (slot.startsOn && ymd < slot.startsOn) return null;
+  if (slot.endsOn && ymd > slot.endsOn) return null;
+  // Suspendida ese día: la cancha queda libre.
+  if (exception?.cancelled) return null;
+  return {
+    resourceId: exception?.resourceId ?? slot.resourceId,
+    startTime: exception?.startTime ?? slot.startTime,
+    endTime: exception?.endTime ?? slot.endTime,
+  };
+}
+
 export function slotAppliesTo(
   slot: Pick<InstructorSlot, 'resourceId' | 'dayOfWeek' | 'startsOn' | 'endsOn' | 'active'>,
   resourceId: string,
@@ -586,6 +686,8 @@ export const updateTurnoSettingsSchema = z.object({
   listedOnLanding: z.boolean().optional(),
   // Precios diferenciados de fin de semana (sábado/domingo) en las categorías.
   priceWeekendEnabled: z.boolean().optional(),
+  // Turnos fijos: si el comercio los usa (canchas de pádel, por ejemplo).
+  recurringEnabled: z.boolean().optional(),
   // Recargo por luz: se suma solo a los turnos que usan luz artificial.
   lightEnabled: z.boolean().optional(),
   // 'HH:MM' — desde qué hora se considera que el turno usa luz.

@@ -51,6 +51,8 @@ export class AppointmentsService {
           priceAtBooking: true,
           players: true,
           products: true,
+          // Para distinguir en la agenda un turno fijo de uno suelto.
+          recurringId: true,
           customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
           resource: { select: { id: true, name: true, color: true } },
           service: { select: { id: true, name: true, durationMin: true, color: true } },

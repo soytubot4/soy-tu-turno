@@ -13,12 +13,15 @@ import {
   Map,
   Package,
   GraduationCap,
+  Repeat,
   Menu,
   X,
 } from 'lucide-react';
 import type { TurnoCapability } from '@soytuturno/shared';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { useQuery } from '@tanstack/react-query';
 import { useMe } from '@/features/me/api';
+import { getTurnoSettings } from '@/features/horarios/settings-api';
 import { cn } from '@/lib/utils';
 
 // Paths LIMPIOS (los que ve el navegador). El middleware reescribe a /panel/*
@@ -35,6 +38,8 @@ const NAV: {
   canchasOnly?: boolean;
   /** Solo visible si el comercio tiene productos habilitados. */
   productsOnly?: boolean;
+  /** Solo visible si el comercio acepta turnos fijos. */
+  recurringOnly?: boolean;
 }[] = [
   { href: '/', label: 'Agenda', icon: CalendarDays, exact: true },
   { href: '/servicios', label: 'Servicios', icon: Scissors },
@@ -42,6 +47,7 @@ const NAV: {
   { href: '/equipo', label: 'Equipo', icon: Users, canchasLabel: 'Canchas' },
   { href: '/mapa', label: 'Mapa', icon: Map, canchasOnly: true, capability: 'resources:write' },
   { href: '/profesores', label: 'Profesores', icon: GraduationCap, canchasOnly: true, capability: 'resources:write' },
+  { href: '/fijos', label: 'Turnos fijos', icon: Repeat, capability: 'appointments:write', recurringOnly: true },
   { href: '/horarios', label: 'Configuración', icon: Settings },
   { href: '/usuarios', label: 'Usuarios', icon: ShieldCheck, capability: 'team:manage' },
 ];
@@ -50,6 +56,9 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const router = useRouter();
   const { me, can, canchas, products } = useMe();
+  // Los turnos fijos son opcionales por comercio: si están apagados, la sección
+  // no aparece en el menú.
+  const { data: settings } = useQuery({ queryKey: ['turno-settings'], queryFn: getTurnoSettings });
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Cerrar el menú al navegar (mobile).
@@ -61,7 +70,8 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
     (item) =>
       (!item.capability || can(item.capability)) &&
       (!item.canchasOnly || canchas) &&
-      (!item.productsOnly || products),
+      (!item.productsOnly || products) &&
+      (!item.recurringOnly || !!settings?.recurringEnabled),
   );
 
   async function logout() {

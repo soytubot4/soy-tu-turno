@@ -117,6 +117,8 @@ model Tenant {
   resources        Resource[]
   instructors      Instructor[]
   instructorSlots  InstructorSlot[]
+  slotExceptions   InstructorSlotException[]
+  recurring        RecurringAppointment[]
   appointments     Appointment[]
   reviews          Review[]
   playerCategories PlayerCategory[]
@@ -190,6 +192,7 @@ model Customer {
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   appointments Appointment[]
   reviews      Review[]
+  recurring    RecurringAppointment[]
 
   @@unique([tenantId, phone])
   @@unique([tenantId, dni])
@@ -201,6 +204,39 @@ model Customer {
 // ─────────────────────────────────────────────────────────────
 // Tablas NUEVAS de turnos (se crean con sql/01-turnos.sql, con RLS)
 // ─────────────────────────────────────────────────────────────
+
+/// Turno fijo: el socio tiene la cancha todas las semanas a la misma hora.
+/// A partir de esta regla se generan turnos concretos (Appointment), que se
+/// comportan como cualquier otro: se ven en la agenda, se cobran y se puede
+/// cancelar uno suelto sin perder el resto.
+model RecurringAppointment {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  customerId String    @map("customer_id") @db.Uuid
+  resourceId String    @map("resource_id") @db.Uuid
+  serviceId  String    @map("service_id") @db.Uuid
+  /// 0=Dom … 6=Sáb
+  dayOfWeek  Int       @map("day_of_week")
+  startTime  String    @map("start_time") // 'HH:MM'
+  active     Boolean   @default(true)
+  /// Vigencia opcional. Sin `endsOn` se renueva hasta que lo den de baja.
+  startsOn   DateTime? @map("starts_on") @db.Date
+  endsOn     DateTime? @map("ends_on") @db.Date
+  /// Hasta qué fecha ya se generaron turnos.
+  generatedUntil DateTime? @map("generated_until") @db.Date
+  notes      String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  resource     Resource      @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  service      Service       @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@index([tenantId, active])
+  @@map("recurring_appointments")
+}
 
 /// Profesor que da clases en el club. No se reserva: sus horarios ocupan la
 /// cancha y dejan de ofrecerse.
@@ -244,10 +280,36 @@ model InstructorSlot {
   tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   instructor Instructor @relation(fields: [instructorId], references: [id], onDelete: Cascade)
   resource   Resource?  @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  exceptions InstructorSlotException[]
 
   @@index([tenantId, dayOfWeek])
   @@index([instructorId])
   @@map("instructor_slots")
+}
+
+/// Lo que cambia de una clase SOLO para una fecha: se movió de horario o de
+/// cancha, o ese día no hay. La clase semanal queda intacta.
+model InstructorSlotException {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  slotId     String   @map("slot_id") @db.Uuid
+  date       DateTime @db.Date
+  /// true = ese día no hay clase.
+  cancelled  Boolean  @default(false)
+  /// Null = como siempre.
+  startTime  String?  @map("start_time")
+  endTime    String?  @map("end_time")
+  resourceId String?  @map("resource_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  slot     InstructorSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  resource Resource?      @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([slotId, date])
+  @@index([tenantId, date])
+  @@map("instructor_slot_exceptions")
 }
 
 /// Categoría de persona que define cuánto paga cada una (ej: socio con abono,
@@ -291,6 +353,7 @@ model Service {
   tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   resources    ResourceService[]
   appointments Appointment[]
+  recurring    RecurringAppointment[]
 
   @@index([tenantId])
   @@map("services")
@@ -330,6 +393,8 @@ model Resource {
   services        ResourceService[]
   schedules       ResourceSchedule[]
   instructorSlots InstructorSlot[]
+  slotExceptions  InstructorSlotException[]
+  recurring       RecurringAppointment[]
   blocks       ScheduleBlock[]
   appointments Appointment[]
   reviews      Review[]
@@ -407,12 +472,15 @@ model Appointment {
   players    Json?
   // Productos reservados junto al turno: [{ productId, name, qty, price }]
   products   Json?
+  /// Si salió de un turno fijo, de qué regla. Null = turno suelto.
+  recurringId String?          @map("recurring_id") @db.Uuid
   createdAt  DateTime          @default(now()) @map("created_at")
   updatedAt  DateTime          @updatedAt @map("updated_at")
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
   resource Resource @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+  recurring RecurringAppointment? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
   service  Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, startAt])
